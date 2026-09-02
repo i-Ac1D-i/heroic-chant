@@ -1,0 +1,4 @@
+# The server itself needs nothing. It is stdlib-only on purpose: it should
+# still run in ten years on whatever Python is lying around.
+#
+# The dev tools do need these -- see requirements-dev.txt.

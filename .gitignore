@@ -1,0 +1,38 @@
+# --- game data -------------------------------------------------------------
+# None of this is ours to redistribute. It all comes out of your own copy of
+# the game, and the tools in tools/ will rebuild it. See CONTRIBUTING.md.
+#
+# Note: git has no inline comments. A trailing "# what this is" on a pattern
+# line becomes part of the pattern and silently matches nothing.
+
+# extracted script tables (tools/extract_assets.py)
+/data/
+# exported cutscene text (tools/export_story.py)
+/story/
+# packet + DTO layouts (tools/gen_protocol.py). Leading "/" anchors these to
+# the repo root, or "data/" would also swallow hc/data/.
+hc/protocol/spec.json
+*.apk
+*.so
+global-metadata.dat
+
+# --- runtime ---------------------------------------------------------------
+# player saves
+/accounts/
+/logs/
+*.log
+
+# --- python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+
+# --- editors ---------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store

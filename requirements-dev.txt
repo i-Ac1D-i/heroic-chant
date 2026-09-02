@@ -1,0 +1,5 @@
+# Only the tools in tools/ need these. The server never imports them.
+
+UnityPy>=1.20        # read/write the game's AssetBundles
+capstone>=5.0        # ARM64 disassembly, for regenerating the protocol spec
+cryptography>=42.0   # AES for the "adong:" table envelope
