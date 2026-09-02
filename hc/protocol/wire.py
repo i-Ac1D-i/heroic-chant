@@ -1,7 +1,7 @@
 """NGNet wire format.
 
 Every constant and rule here was recovered by disassembling
-``lib/arm64-v8a/libil2cpp.so`` from Hero Cantare 1.2.389; the RVA of the
+``lib/arm64-v8a/libil2cpp.so`` from HC 1.2.389; the RVA of the
 originating function is cited next to each rule.  See docs/PROTOCOL.md.
 """
 import zlib

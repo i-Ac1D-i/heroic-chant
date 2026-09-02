@@ -294,7 +294,7 @@ def main():
             'ns': e['ns'], 'name': e['name'],
             'fields': [{'name': n, 'kind': k[0], 'type': k[1]} for k, n in want]}
 
-    json.dump({'source': 'Hero Cantare 1.2.389 arm64-v8a libil2cpp.so',
+    json.dump({'source': 'HC 1.2.389 arm64-v8a libil2cpp.so',
                'dtos': dtos, 'packets': packets},
               open(args.out, 'w'), indent=1, sort_keys=True)
 

@@ -10,7 +10,7 @@ from .protocol.dto import PACKET_SPEC
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description='Hero Cantare 1.2.389 private server')
+    ap = argparse.ArgumentParser(description='HC 1.2.389 private server')
     ap.add_argument('--host', default=config.BIND_HOST, help='bind address')
     ap.add_argument('--port', type=int, default=config.PORT)
     ap.add_argument('--public-host', default=config.PUBLIC_HOST,

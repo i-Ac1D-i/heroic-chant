@@ -1,4 +1,4 @@
-# Hero Cantare 1.2.389 — wire protocol
+# HC 1.2.389 — wire protocol
 
 Everything below was recovered by disassembling `lib/arm64-v8a/libil2cpp.so`
 (Unity 2020.3.16f1, il2cpp metadata v27) from the shipped APK. RVAs are cited

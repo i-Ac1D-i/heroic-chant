@@ -216,7 +216,7 @@ other than the listings we serve. Not chased further.
 These were all real, and all are committed.
 
 1. **`ServerName` must be a number.** `AuthScene.OnGetServerGroup` @0x1E906B4
-   does `int.Parse(NGServerGroupInfo.ServerName)`. Sending `"Hero Cantare"`
+   does `int.Parse(NGServerGroupInfo.ServerName)`. Sending `"HC" (well, the game full name)`
    threw a `FormatException` inside the client and login silently stalled with
    no visible error. It is a string-table id: 34645 = "Global". Now
    `config.SERVER_NAME_STRING_ID`.
