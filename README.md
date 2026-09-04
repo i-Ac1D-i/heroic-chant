@@ -57,6 +57,25 @@ it and tells the client where your server lives.
 If you're on the emulator setup already, `python tools/resume.py` brings
 everything back up in one go.
 
+## Running it on a phone, with no PC at all
+
+There's a second route where the game and the server both live on the phone and
+talk over loopback. No emulator, no root, no adb, no DNS.
+
+```bash
+python tools/patch_apk.py ../com.ngelgames.herocantare_1.2.389.apk
+python tools/make_mobile_bundle.py
+```
+
+That produces an APK whose baked-in boot URLs point at `127.0.0.1:8080`, plus a
+12 MB data bundle. Install the APK, install Termux, run one setup command, and
+that's it — the game downloads its own assets from the server over loopback,
+into its own folder, exactly the way it did from the real CDN in 2023. Which is
+what removes the root requirement.
+
+Building the APK needs a PC once (Android SDK). Playing doesn't.
+[docs/MOBILE.md](docs/MOBILE.md) has the whole thing.
+
 ## How it works
 
 The protocol wasn't guessed. Every one of the **859 packets** and **180 wire
@@ -93,4 +112,5 @@ The server is mine and you can do what you want with it.
 | [CONTRIBUTING.md](CONTRIBUTING.md) | setup, layout, how to add a feature |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | the wire format, with evidence |
 | [docs/TESTING.md](docs/TESTING.md) | getting a device connected |
+| [docs/MOBILE.md](docs/MOBILE.md) | phone-only setup, and how the APK patch works |
 | [docs/STATUS.md](docs/STATUS.md) | running log of what's been built and what broke |

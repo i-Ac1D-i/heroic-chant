@@ -18,8 +18,13 @@ import sqlite3
 from collections import defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DATA_DIR = os.path.join(ROOT, 'data')
-DB_PATH = os.path.join(os.path.dirname(ROOT), 'table', 'herocantare.db')
+
+# The defaults assume the PC layout, where `table/` sits next to `server/`.
+# HC_DATA_DIR / HC_DB_PATH override that for setups whose tree looks different
+# -- a phone under Termux, most obviously, where everything lands in one place.
+DATA_DIR = os.environ.get('HC_DATA_DIR') or os.path.join(ROOT, 'data')
+DB_PATH = (os.environ.get('HC_DB_PATH')
+           or os.path.join(os.path.dirname(ROOT), 'table', 'herocantare.db'))
 
 
 def to_int(v, default=-1):

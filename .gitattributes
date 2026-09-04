@@ -1,0 +1,9 @@
+# Shell scripts must keep LF endings. A CRLF shebang makes the Android/Linux
+# loader look for an interpreter named "bash\r", which fails with a confusing
+# "no such file or directory" naming a binary that plainly exists.
+*.sh text eol=lf
+
+# Python is run by an interpreter that does not care, but keep it consistent.
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf

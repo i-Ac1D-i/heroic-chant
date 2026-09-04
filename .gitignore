@@ -36,3 +36,12 @@ dist/
 .vscode/
 .idea/
 .DS_Store
+
+# --- build output -----------------------------------------------------------
+# Signing keys are private. Never commit one -- anyone holding it can publish
+# an update that Android will accept as yours.
+*.keystore
+*.jks
+*-heroicchant.apk
+*.apk.unaligned
+build-apk/

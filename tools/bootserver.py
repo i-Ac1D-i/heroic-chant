@@ -21,9 +21,19 @@ stock, unrooted device just by setting its Wi-Fi DNS to this machine.
     # HTTP only (if you are redirecting DNS some other way)
     python tools/bootserver.py --host 192.168.1.50 --no-dns
 
+    # phone-only: APK patched by tools/patch_apk.py, everything on loopback
+    python tools/bootserver.py --host 127.0.0.1 --http-port 8080 --no-dns \
+        --client-files ~/hc/ngelgames.zip
+
 Run the game server alongside it:
 
     python -m hc.main --public-host 192.168.1.50
+
+We also stand in for the asset CDN.  `cdninfo` in the patchinfo we serve is
+rewritten to point back at us, so the client downloads its AssetBundles from
+here into its own private directory, exactly the way it did from the real CDN
+in 2023.  That is what makes an unrooted phone possible: nothing ever has to
+reach into /data/data by hand.
 """
 import argparse
 import json
@@ -33,11 +43,11 @@ import socketserver
 import struct
 import sys
 import threading
+import zipfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CLIENT_FILES = os.path.join(HERE, '..', '..', 'files', 'ngelgames')
-BUNDLES = os.path.join(CLIENT_FILES, 'AssetBundle')
+DEFAULT_CLIENT_FILES = os.path.join(HERE, '..', '..', 'files', 'ngelgames')
 
 # Hostnames that should resolve to us.
 MATCH = ('ngelgames.net', 'ngelgames.co.kr', 'ngelgames.com',
@@ -45,7 +55,66 @@ MATCH = ('ngelgames.net', 'ngelgames.co.kr', 'ngelgames.com',
 
 HOST = '127.0.0.1'
 PORT = 21010
+HTTP_PORT = 80
 VERBOSE = True
+ASSETS = None                      # an Assets, set up in main()
+
+
+class Assets(object):
+    """The client's `files/ngelgames` tree, as a directory or as a zip.
+
+    On a phone the zip form matters: the game is going to download its own
+    copy of everything anyway, so unpacking our copy first would cost a second
+    2 GB for no reason.  Reading straight out of the archive avoids that.
+    """
+
+    def __init__(self, root):
+        self.root = root
+        self.zip = None
+        if os.path.isfile(root) and root.lower().endswith('.zip'):
+            self.zip = zipfile.ZipFile(root)
+            # Tolerate an archive with (or without) a leading ngelgames/ dir.
+            names = self.zip.namelist()
+            self._names = {n.strip('/').lower(): n for n in names}
+            prefixes = {n.split('/')[0] for n in names if '/' in n}
+            self.prefix = ('ngelgames' if 'ngelgames' in prefixes
+                           else next(iter(prefixes)) if len(prefixes) == 1 else '')
+        elif not os.path.isdir(root):
+            raise SystemExit('client files not found: %s' % root)
+
+    def _candidates(self, rel):
+        rel = rel.replace('\\', '/').strip('/')
+        yield rel
+        if self.zip is not None and self.prefix:
+            yield '%s/%s' % (self.prefix, rel)
+
+    def find(self, *parts):
+        """Locate a file below the client root.  Returns a key, or None."""
+        rel = '/'.join(str(p) for p in parts if p)
+        for cand in self._candidates(rel):
+            if self.zip is not None:
+                hit = self._names.get(cand.lower())
+                if hit is not None and not hit.endswith('/'):
+                    return hit
+            else:
+                full = os.path.join(self.root, *cand.split('/'))
+                if os.path.isfile(full):
+                    return full
+        return None
+
+    def size(self, key):
+        return (self.zip.getinfo(key).file_size if self.zip is not None
+                else os.path.getsize(key))
+
+    def open(self, key):
+        return self.zip.open(key) if self.zip is not None else open(key, 'rb')
+
+    def read_json(self, name):
+        key = self.find(name)
+        if key is None:
+            return None
+        with self.open(key) as fh:
+            return json.loads(fh.read().decode('utf-8-sig'))
 
 
 def log(fmt, *a):
@@ -54,31 +123,32 @@ def log(fmt, *a):
 
 
 # ------------------------------------------------------------------ HTTP --
-def _load(name, fallback):
-    path = os.path.join(CLIENT_FILES, name)
-    if os.path.exists(path):
-        with open(path, encoding='utf-8-sig') as fh:
-            return json.load(fh)
-    return fallback
+def cdn_base(version):
+    """The asset CDN URL we hand the client -- ourselves, not the dead one."""
+    return 'http://%s:%d/herocantare/assetbundle/aos/update_aos_%s/' % (
+        HOST, HTTP_PORT, version)
 
 
 def patchinfo(version):
-    obj = _load('real_patchinfo%s.json' % version, None)
+    obj = ASSETS.read_json('real_patchinfo%s.json' % version) if ASSETS else None
     if obj is None:
         obj = {'rvInfo': [{'version': '1.2.389', 'devicetype': d, 'service': 0,
                            'server': 2, 'message': '1075', 'labeltype': 1,
                            'resourceVersion': '22',
-                           'cdninfo': 'http://%s:8080/assets/' % HOST,
                            'market': 'market://details?id=com.ngelgames.herocantare'}
                           for d in ('AOS', 'IOS')]}
     for entry in obj.get('rvInfo', []):
         entry['serverip'] = HOST
         entry['serverport'] = PORT
+        # The shipped file points cdninfo at dlhc.ngelgames.net.  Leaving it
+        # alone strands any device that is not having its DNS redirected --
+        # which is every unrooted phone -- so always claim the CDN too.
+        entry['cdninfo'] = cdn_base(version)
     return obj
 
 
 def serverinfo():
-    obj = _load('real_serverinfo.json', None)
+    obj = ASSETS.read_json('real_serverinfo.json') if ASSETS else None
     if obj is None:
         obj = {'centerInfo': [{'nationID': n, 'nationName': 34645,
                                'noticePage': '', 'guidePage': '',
@@ -97,14 +167,14 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def _send_file(self, path, local, ctype):
-        size = os.path.getsize(local)
-        log('  HTTP %s -> %s (%d bytes)', path, os.path.basename(local), size)
+    def _send_file(self, path, key, ctype):
+        size = ASSETS.size(key)
+        log('  HTTP %s -> %s (%d bytes)', path, os.path.basename(key), size)
         self.send_response(200)
         self.send_header('Content-Type', ctype)
         self.send_header('Content-Length', str(size))
         self.end_headers()
-        with open(local, 'rb') as fh:
+        with ASSETS.open(key) as fh:
             while True:
                 chunk = fh.read(256 * 1024)
                 if not chunk:
@@ -121,6 +191,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split('?')[0]
+        # tools/patch_apk.py pads the baked-in base URL with extra slashes to
+        # keep its byte length identical, so requests arrive looking like
+        # /////herocantare/patchinfo/real_patchinfo12389.json.  Collapse them.
+        while '//' in path:
+            path = path.replace('//', '/')
         name = path.rsplit('/', 1)[-1]
 
         if name.startswith('real_patchinfo') and name.endswith('.json'):
@@ -152,22 +227,22 @@ class Handler(BaseHTTPRequestHandler):
                     variants.append(rest[1:])
                 # Bundles live under AssetBundle/, but movies sit beside it in
                 # ngelgames/movie/, so search both roots.
-                for root in (BUNDLES, CLIENT_FILES):
+                for prefix in ('AssetBundle', ''):
                     for v in variants:
-                        cand = os.path.join(root, *v)
-                        if os.path.isfile(cand):
-                            return self._send_file(path, cand,
+                        key = ASSETS.find(prefix, *v)
+                        if key is not None:
+                            return self._send_file(path, key,
                                                    'application/octet-stream')
 
         # Anything else the client asks for that we have a local copy of.
         # This covers the asset manifests it fetches from the CDN path --
         # assetList.json.gz in particular, which it will retry forever.
-        local = os.path.join(CLIENT_FILES, name)
-        if name and os.path.isfile(local):
+        key = ASSETS.find(name) if name else None
+        if key is not None:
             ctype = ('application/gzip' if name.endswith('.gz')
                      else 'application/json' if name.endswith('.json')
                      else 'application/octet-stream')
-            return self._send_file(path, local, ctype)
+            return self._send_file(path, key, ctype)
 
         log('  HTTP %s -> 404', path)
         self.send_response(404)
@@ -233,19 +308,27 @@ def dns_serve(bind, upstream):
 
 # ------------------------------------------------------------------ main --
 def main():
-    global HOST, PORT, VERBOSE
+    global HOST, PORT, HTTP_PORT, VERBOSE, ASSETS
     ap = argparse.ArgumentParser()
     ap.add_argument('--host', required=True,
-                    help="this machine's LAN IP, as the device should reach it")
+                    help="this machine's LAN IP, as the device should reach it "
+                         "(127.0.0.1 when the server runs on the phone itself)")
     ap.add_argument('--port', type=int, default=21010, help='game server port')
     ap.add_argument('--http-port', type=int, default=80)
     ap.add_argument('--bind', default='0.0.0.0')
     ap.add_argument('--upstream-dns', default='8.8.8.8')
     ap.add_argument('--no-dns', action='store_true', help='serve HTTP only')
+    ap.add_argument('--client-files',
+                    default=os.environ.get('HC_CLIENT_FILES', DEFAULT_CLIENT_FILES),
+                    help='the client files/ngelgames directory, or a .zip of it '
+                         '(also settable with HC_CLIENT_FILES)')
     ap.add_argument('-q', '--quiet', action='store_true')
     args = ap.parse_args()
 
     HOST, PORT, VERBOSE = args.host, args.port, not args.quiet
+    HTTP_PORT = args.http_port
+    ASSETS = Assets(os.path.expanduser(args.client_files))
+    log('assets  %s%s', ASSETS.root, ' (zip)' if ASSETS.zip is not None else '')
 
     if not args.no_dns:
         t = threading.Thread(target=dns_serve, args=(args.bind, args.upstream_dns),

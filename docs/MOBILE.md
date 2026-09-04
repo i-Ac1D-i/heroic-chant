@@ -1,0 +1,207 @@
+# Running the whole thing on a phone
+
+No PC, no emulator, no root, no adb, no DNS fiddling. The game and the server
+both run on the phone, talking to each other over loopback.
+
+There's one honest caveat up front: **building** the patched APK needs a PC
+once, because it uses the Android SDK's `zipalign` and `apksigner`. But that's
+a build step, not a play step. Once someone has run it, everyone else just
+installs the APK and never touches a computer.
+
+So this doc has two halves: [building](#building-it-once) (done once, on a PC)
+and [playing](#playing-phone-only) (done by everyone, on the phone).
+
+---
+
+## How it works
+
+The retail client has two URLs baked into `global-metadata.dat`:
+
+```
+http://dlhc.ngelgames.net/herocantare/patchinfo/
+http://dlhc.ngelgames.net/herocantare/serverinfo/
+```
+
+Both hosts are dead. On a PC setup we redirect them with a hosts file or a DNS
+shim, but an unrooted phone allows neither — and even with a redirect, the
+client would dial port 80, which an unprivileged Android app cannot bind.
+
+So `tools/patch_apk.py` rewrites the URLs to point at `127.0.0.1:8080`. The
+trick that makes it safe is that il2cpp stores each string literal with an
+explicit length in a side table, so a different-length replacement would mean
+rewriting that table and every offset after it. We dodge all of that by padding
+with slashes until the replacement is *byte-for-byte the same length*:
+
+```
+http://dlhc.ngelgames.net/herocantare/patchinfo/     48 bytes
+http://127.0.0.1:8080/////herocantare/patchinfo/     48 bytes
+```
+
+An HTTP server collapses repeated slashes, so the padding is free. Nothing in
+the binary moves, which is why this needs no apktool, no smali, and no manifest
+surgery — just a byte swap, a repack and a re-sign.
+
+Everything downstream is already ours. The patchinfo JSON *we serve* carries
+`serverip`/`serverport` (so the game server address needs no patch at all) and
+`cdninfo` (so the client downloads its own AssetBundles from us, into its own
+private directory, exactly as it did from the real CDN in 2023). That last part
+is what removes the root requirement: nothing ever reaches into `/data/data`
+by hand.
+
+---
+
+## Building it once
+
+On a PC, with the tree set up as in [CONTRIBUTING.md](../CONTRIBUTING.md) and
+`gen_protocol.py` / `extract_assets.py` already run.
+
+You need the Android SDK build-tools (`zipalign`, `apksigner`) and a JDK. If
+you've ever installed Android Studio you have both.
+
+**1. Patch the APK.**
+
+```bash
+python tools/patch_apk.py ../com.ngelgames.herocantare_1.2.389.apk
+```
+
+Generates a signing key on first run (`tools/heroicchant.keystore` — gitignored,
+keep it if you ever want to ship an update the phone will accept as the same
+app), and writes `com.ngelgames.herocantare_1.2.389-heroicchant.apk`.
+
+**2. Build the data bundle.**
+
+```bash
+python tools/make_mobile_bundle.py
+```
+
+Writes `heroic-chant-data.zip` (~12 MB): `spec.json`, the 252 JSON tables, and
+`herocantare.db`. The phone can't generate these itself — `gen_protocol.py`
+needs capstone and a 33 MB `dump.cs`, `extract_assets.py` needs UnityPy, and
+neither installs cleanly under Termux on arm64.
+
+**3. Zip the client files.**
+
+```bash
+cd .. && zip -r ngelgames.zip files/ngelgames
+```
+
+~2 GB. This is what the server feeds back to the game as its CDN.
+
+That's three artifacts: the APK, `heroic-chant-data.zip`, `ngelgames.zip`.
+
+---
+
+## Playing (phone only)
+
+Everything from here happens on the phone.
+
+### 1. Get the three files onto it
+
+Download the APK, `heroic-chant-data.zip` and `ngelgames.zip` into your
+**Downloads** folder, however you like — browser, cable, cloud.
+
+### 2. Install the APK
+
+Tap it. Android will ask you to allow installing from unknown sources; allow it.
+
+If you already have the retail Hero Cantare installed, **uninstall it first**.
+The patched build is signed with a different key, so Android refuses to install
+it over the top. The error ("App not installed") doesn't explain this.
+
+### 3. Install Termux
+
+Get it from **F-Droid** — https://f-droid.org/packages/com.termux/
+
+Not the Play Store version. That one is years out of date and its package
+manager no longer works.
+
+### 4. Run the setup script
+
+Open Termux and paste:
+
+```bash
+pkg install -y curl && curl -sL https://raw.githubusercontent.com/i-Ac1D-i/heroic-chant/main/tools/termux-setup.sh | bash
+```
+
+It installs Python and git, asks for storage permission (tap **Allow**), finds
+the two zips in your Downloads, clones the server, unpacks the data into place,
+writes a launcher, and runs the self-test.
+
+### 5. Start it
+
+```bash
+~/heroic-chant/start.sh
+```
+
+You'll see:
+
+```
+Heroic Chant is running.
+  boot shim  : 127.0.0.1:8080   (~/heroic-chant/logs/boot.log)
+  game server: 127.0.0.1:21010  (~/heroic-chant/logs/game.log)
+```
+
+Leave it running. Switch to the Hero Cantare app and play.
+
+**First launch downloads about 2 GB** — that's the game pulling its assets from
+the server over loopback, into its own folder. It's fast (nothing leaves the
+phone) and it only happens once. You need roughly 4 GB free during this: 2 GB
+for the zip the server reads from, 2 GB for the game's own copy. Afterwards you
+can delete `ngelgames.zip` from Downloads if you keep the one in
+`~/heroic-chant/`.
+
+---
+
+## Keeping it alive
+
+Android aggressively kills background apps, and if it kills Termux the game
+loses its server mid-session.
+
+Before starting, run:
+
+```bash
+termux-wake-lock
+```
+
+And exempt Termux from battery optimisation in Android's settings
+(Settings → Apps → Termux → Battery → Unrestricted). Without this you'll get
+random disconnects that look like server bugs.
+
+---
+
+## When it doesn't work
+
+| What you see | What's wrong |
+|---|---|
+| "App not installed" | The retail version is still installed. Uninstall it first — different signing key |
+| Game hangs on the loading bar | The server isn't running, or Termux got killed. Check `~/heroic-chant/logs/boot.log` |
+| `boot.log` empty, game stuck | The APK wasn't patched. A retail APK still points at the dead CDN — check you installed the `-heroicchant` one |
+| Setup script: "Can't see your Downloads folder" | Run `termux-setup-storage` and tap Allow, then re-run |
+| Setup script: "ngelgames.zip not found" | It has to be in Downloads and its name has to start with `ngelgames` |
+| Asset download stalls partway | Usually free space. It needs ~2 GB beyond the zip |
+| `pkg install` fails | You're on the Play Store Termux. Uninstall it, get the F-Droid build |
+| Game connects then drops after a few minutes | Android killed Termux. `termux-wake-lock` and disable battery optimisation |
+
+To see what the client is actually asking for:
+
+```bash
+tail -f ~/heroic-chant/logs/boot.log
+tail -f ~/heroic-chant/logs/game.log
+```
+
+---
+
+## Pointing a phone at a PC instead
+
+If you'd rather run the server on a PC and just use the patched APK on the
+phone, build it with your LAN IP instead of loopback:
+
+```bash
+python tools/patch_apk.py in.apk --host 192.168.1.50 --port 8080
+```
+
+The host and port have to fit in the same byte count as the original URL, which
+gives you 48 characters to play with — plenty for any LAN address, but the tool
+will tell you if you somehow overflow it. Then run the server as in
+[TESTING.md](TESTING.md), with `--http-port 8080`, and skip all the DNS and
+hosts-file steps: the APK already knows where to look.
