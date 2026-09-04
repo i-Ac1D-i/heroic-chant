@@ -94,6 +94,27 @@ def patch_metadata(blob, host, port):
     return blob, notes
 
 
+def check_apk(path):
+    """Report where an APK's boot URLs point.
+
+    Returns (patched, [urls]).  The phone-only setup lives or dies on this:
+    an unpatched APK still dials dlhc.ngelgames.net, which no longer exists
+    and which an unrooted phone cannot redirect, so it just hangs on the
+    loading bar with nothing in any log.  Worth failing loudly on.
+    """
+    import re
+    with zipfile.ZipFile(path) as z:
+        blob = z.read(METADATA)
+    found = []
+    for m in re.finditer(rb'http://[\x21-\x7e]{6,60}?/+herocantare/(?:patch|server)info/', blob):
+        # String literals are packed end to end with no separator, so a match
+        # can run back into the previous one. Keep only the last URL in it.
+        u = m.group().decode('ascii', 'replace')
+        found.append(u[u.rfind('http://'):])
+    patched = bool(found) and not any('ngelgames.net' in u for u in found)
+    return patched, sorted(set(found))
+
+
 def find_tool(name):
     """Locate an Android build-tool, preferring the newest build-tools dir."""
     for cand in (name, name + '.exe', name + '.bat'):
@@ -193,12 +214,28 @@ def main():
     ap.add_argument('--ks-alias', default='heroicchant')
     ap.add_argument('--no-sign', action='store_true',
                     help='stop after zipalign, leaving an unsigned APK')
+    ap.add_argument('--check', action='store_true',
+                    help='report where an APK\'s boot URLs point and exit; '
+                         'exit status 0 if already patched, 1 if not')
     args = ap.parse_args()
 
     here = os.path.dirname(os.path.abspath(__file__))
     src = os.path.abspath(args.apk)
     if not os.path.isfile(src):
         sys.exit('no such APK: %s' % src)
+
+    if args.check:
+        try:
+            patched, urls = check_apk(src)
+        except (KeyError, zipfile.BadZipFile) as exc:
+            print('not a readable Unity APK: %s' % exc)
+            return 1
+        for u in urls:
+            print('  %s' % u)
+        if not urls:
+            print('  no boot URLs found -- is this the right APK?')
+        print('patched' if patched else 'NOT patched (still points at the dead CDN)')
+        return 0 if patched else 1
     out = os.path.abspath(
         args.out or os.path.splitext(src)[0] + '-heroicchant.apk')
     keystore = os.path.abspath(args.keystore or

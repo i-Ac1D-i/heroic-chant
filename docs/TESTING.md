@@ -15,21 +15,20 @@ before touching a device.
 
 ## 1. What you need
 
-**An ARM-capable Android with root.** Both are hard requirements:
+**An ARM-capable Android.** The APK ships **arm64-v8a and armeabi-v7a only**
+— no x86. A stock Android Studio AVD on an x86_64 image will not run it. Use
+**LDPlayer 9** or **MuMu Player 12** (both do ARM translation), or a real phone.
 
-* The APK ships **arm64-v8a and armeabi-v7a only** — no x86. A stock Android
-  Studio AVD on an x86_64 image will not run it. Use **LDPlayer 9** or
-  **MuMu Player 12** (both do ARM translation), or a real phone.
-* **Root is required.** The 1.9 GB of AssetBundles in `files/` must sit inside
-  `/data/data/com.ngelgames.herocantare/`, and a fresh install cannot download
-  them — the CDN is gone. You already pulled that directory off your phone, so
-  whatever you used then will work again.
+**Root is not required.** It used to say otherwise here, on the assumption that
+the AssetBundles had to be placed inside `/data/data/`. They don't: the client
+keeps them in `/storage/emulated/0/Android/data/com.ngelgames.herocantare/files/ngelgames/`,
+which is app-specific *external* storage — writable over adb with no root and
+no SELinux relabelling. And you usually don't need to place them at all, because
+`bootserver.py` stands in for the dead CDN and the game downloads its own copy
+(see §2).
 
-If you still have the phone you dumped from, that is the path of least
-resistance: the data is already in place there.
-
-Emulator settings: Android 9 or 11, **root enabled**, 4 GB RAM, and enough disk
-for a ~2 GB app data directory.
+Emulator settings: Android 9 or 11, 4 GB RAM, and enough disk for ~4 GB of app
+data. Root is still handy for poking around, just not needed.
 
 ---
 
@@ -41,17 +40,22 @@ adb install ../com.ngelgames.herocantare_1.2.389.apk
 
 Launch it once so Android creates the data directory, then force-stop it.
 
-Push the dumped files (staging through `/sdcard` avoids permission problems):
+**You probably don't need to push anything.** `bootserver.py` serves the asset
+CDN, and the patchinfo it hands the client points `cdninfo` back at it, so on
+first launch the game downloads its own AssetBundles exactly as it did in 2023.
+Confirmed end to end: 1,913 requests, ~1.95 GB, no root involved. Just start the
+servers (§6) and launch the game.
+
+If you would rather seed them by hand — to skip the download, or because you
+already have the dump — they go in external app-specific storage, which adb
+can write directly:
 
 ```bash
-adb push ../files/ngelgames /sdcard/ngelgames
-adb shell su -c "cp -a /sdcard/ngelgames /data/data/com.ngelgames.herocantare/files/"
-adb shell su -c "chown -R \$(stat -c %U:%G /data/data/com.ngelgames.herocantare) /data/data/com.ngelgames.herocantare/files"
-adb shell su -c "restorecon -R /data/data/com.ngelgames.herocantare/files"
+adb push ../files/ngelgames /sdcard/Android/data/com.ngelgames.herocantare/files/ngelgames
 ```
 
-That last `restorecon` matters — wrong SELinux labels make the app silently
-fail to read its own assets.
+No `su`, no `chown`, no `restorecon`. The old instructions here copied into
+`/data/data/` and needed all three; that was simply the wrong directory.
 
 ---
 
@@ -179,7 +183,7 @@ which is exactly the list of what to write next.
 | Game hangs on the loading/patch screen | it never reached the boot HTTP shim — check the device browser test in §6, and the firewall |
 | `connected` then immediate disconnect, no `handshake complete` | the client didn't like the handshake; run with `--log-level DEBUG` and check for a decode error |
 | Nothing at all in either log | DNS is not redirected. Confirm with `adb shell ping dlhc.ngelgames.net` — it must show your IP |
-| App crashes at splash | ARM translation missing (x86 emulator), or `files/` wasn't restored / has wrong ownership — redo the `chown`/`restorecon` |
+| App crashes at splash | ARM translation missing (x86 emulator), or the asset download never finished — check `bootserver.py`'s log for what it last served |
 | Stuck after login, black screen | the client is waiting on a packet with no handler; the `no handler` lines name it |
 | `cannot bind port 80` | not running as Administrator, or IIS/Skype holds port 80 |
 

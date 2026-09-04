@@ -83,13 +83,14 @@ app), and writes `com.ngelgames.herocantare_1.2.389-heroicchant.apk`.
 **2. Build the data bundle.**
 
 ```bash
-python tools/make_mobile_bundle.py
+python tools/make_mobile_bundle.py --no-db
 ```
 
-Writes `heroic-chant-data.zip` (~12 MB): `spec.json`, the 252 JSON tables, and
-`herocantare.db`. The phone can't generate these itself — `gen_protocol.py`
-needs capstone and a 33 MB `dump.cs`, `extract_assets.py` needs UnityPy, and
-neither installs cleanly under Termux on arm64.
+Writes `heroic-chant-data.zip` (~2 MB): `spec.json` and the 252 JSON tables.
+The phone can't generate these itself — `gen_protocol.py` needs capstone and a
+33 MB `dump.cs`, `extract_assets.py` needs UnityPy, and neither installs
+cleanly under Termux on arm64. Drop `--no-db` to fold `herocantare.db` in too
+(~12 MB) if you would rather host one file than two.
 
 **3. Zip the client files.**
 
@@ -99,68 +100,60 @@ cd .. && zip -r ngelgames.zip files/ngelgames
 
 ~2 GB. This is what the server feeds back to the game as its CDN.
 
-That's three artifacts: the APK, `heroic-chant-data.zip`, `ngelgames.zip`.
+**4. Host the three artifacts** — the patched APK, `heroic-chant-data.zip` and
+`ngelgames.zip` — anywhere with direct downloads, then put their ids or URLs at
+the top of `tools/termux-setup.sh` (or let people pass `HC_APK_URL`,
+`HC_DATA_URL`, `HC_FILES_URL`). After that, players run one command and never
+see any of this.
+
+> The APK you host **must be the patched one**. An unpatched retail APK still
+> points at `dlhc.ngelgames.net`, which is dead and which an unrooted phone
+> cannot redirect — it installs fine and then hangs on the loading bar with
+> nothing in any log. `termux-setup.sh` checks before installing and refuses if
+> it isn't patched; you can check by hand with
+> `python tools/patch_apk.py --check <apk>`.
 
 ---
 
 ## Playing (phone only)
 
-Everything from here happens on the phone.
+Install **Termux from F-Droid** — https://f-droid.org/packages/com.termux/ —
+not the Play Store build, which is abandoned and whose package manager no
+longer works.
 
-### 1. Get the three files onto it
-
-Download the APK, `heroic-chant-data.zip` and `ngelgames.zip` into your
-**Downloads** folder, however you like — browser, cable, cloud.
-
-### 2. Install the APK
-
-Tap it. Android will ask you to allow installing from unknown sources; allow it.
-
-If you already have the retail Hero Cantare installed, **uninstall it first**.
-The patched build is signed with a different key, so Android refuses to install
-it over the top. The error ("App not installed") doesn't explain this.
-
-### 3. Install Termux
-
-Get it from **F-Droid** — https://f-droid.org/packages/com.termux/
-
-Not the Play Store version. That one is years out of date and its package
-manager no longer works.
-
-### 4. Run the setup script
-
-Open Termux and paste:
+Then open it and paste one command:
 
 ```bash
 pkg install -y curl && curl -sL https://raw.githubusercontent.com/i-Ac1D-i/heroic-chant/main/tools/termux-setup.sh | bash
 ```
 
-It installs Python and git, asks for storage permission (tap **Allow**), finds
-the two zips in your Downloads, clones the server, unpacks the data into place,
-writes a launcher, and runs the self-test.
+That's the whole install. It fetches the server, the ~2 GB of client files, the
+data tables and the game itself, then installs the game if you don't already
+have it (you tap Install once, on Android's own dialog) and runs a self-test.
 
-### 5. Start it
+Anything already sitting in your Downloads folder gets used instead of being
+re-downloaded, and any download that dies partway resumes on the next run.
+
+Then:
 
 ```bash
 ~/heroic-chant/start.sh
 ```
 
-You'll see:
+Switch to Hero Cantare and play. First launch shows **"New patch is available.
+Download now? — 862 MB"**; tap OK. That's the game pulling its assets from the
+server over loopback — nothing leaves the phone, and it only happens once.
 
+### Updating
+
+Re-run the same command:
+
+```bash
+curl -sL https://raw.githubusercontent.com/i-Ac1D-i/heroic-chant/main/tools/termux-setup.sh | bash
 ```
-Heroic Chant is running.
-  boot shim  : 127.0.0.1:8080   (~/heroic-chant/logs/boot.log)
-  game server: 127.0.0.1:21010  (~/heroic-chant/logs/game.log)
-```
 
-Leave it running. Switch to the Hero Cantare app and play.
-
-**First launch downloads about 2 GB** — that's the game pulling its assets from
-the server over loopback, into its own folder. It's fast (nothing leaves the
-phone) and it only happens once. You need roughly 4 GB free during this: 2 GB
-for the zip the server reads from, 2 GB for the game's own copy. Afterwards you
-can delete `ngelgames.zip` from Downloads if you keep the one in
-`~/heroic-chant/`.
+It checks the repo for new commits, lists what changed, and fast-forwards. It
+skips every download it already has, so this is quick.
 
 ---
 

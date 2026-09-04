@@ -44,12 +44,14 @@ def main():
     ap.add_argument('-o', '--out',
                     default=os.path.join(ROOT, 'heroic-chant-data.zip'))
     ap.add_argument('--db', default=DB, help='path to herocantare.db')
+    ap.add_argument('--no-db', action='store_true',
+                    help='leave herocantare.db out (when it is hosted separately)')
     args = ap.parse_args()
 
     check(SPEC, 'spec.json', 'python tools/gen_protocol.py --apk <apk>')
     check(DATA, 'data/', 'python tools/extract_assets.py')
-    db = check(os.path.abspath(args.db), 'herocantare.db',
-               'put it in table/, or pass --db')
+    db = None if args.no_db else check(
+        os.path.abspath(args.db), 'herocantare.db', 'put it in table/, or pass --db')
 
     out = os.path.abspath(args.out)
     n = 0
@@ -63,9 +65,9 @@ def main():
                 full = os.path.join(dirpath, name)
                 z.write(full, 'data/' + os.path.relpath(full, DATA).replace('\\', '/'))
                 n += 1
-        # The .db is already mostly incompressible; stored keeps packing quick.
-        z.write(db, 'herocantare.db')
-        n += 1
+        if db is not None:
+            z.write(db, 'herocantare.db')
+            n += 1
 
     print('wrote %s' % out)
     print('  %d files, %.0f MB' % (n, os.path.getsize(out) / 1e6))
