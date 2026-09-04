@@ -32,7 +32,7 @@ PKG_NAME="com.ngelgames.herocantare"
 : "${HC_DB_ID:=1U3LYz0VUOmfTQcFQe3v7jqJliBxMJ6ci}"
 # spec.json + the JSON tables, from tools/make_mobile_bundle.py --no-db.
 # The phone cannot build these itself, so they have to be hosted.
-: "${HC_DATA_ID:=REPLACE_WITH_HEROIC_CHANT_DATA_ZIP_ID}"
+: "${HC_DATA_ID:=1PEEe0K29jxq0Fnpc92i3-Ztp95r-Uwcl}"
 
 C_OK=$'\033[1;32m'; C_INFO=$'\033[1;36m'; C_WARN=$'\033[1;33m'
 C_ERR=$'\033[1;31m'; C_OFF=$'\033[0m'
