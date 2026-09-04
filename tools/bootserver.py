@@ -71,21 +71,51 @@ class Assets(object):
     def __init__(self, root):
         self.root = root
         self.zip = None
+        self.prefix = ''
         if os.path.isfile(root) and root.lower().endswith('.zip'):
             self.zip = zipfile.ZipFile(root)
-            # Tolerate an archive with (or without) a leading ngelgames/ dir.
             names = self.zip.namelist()
             self._names = {n.strip('/').lower(): n for n in names}
-            prefixes = {n.split('/')[0] for n in names if '/' in n}
-            self.prefix = ('ngelgames' if 'ngelgames' in prefixes
-                           else next(iter(prefixes)) if len(prefixes) == 1 else '')
-        elif not os.path.isdir(root):
+            self.prefix = self._detect_prefix(names)
+        elif os.path.isdir(root):
+            # Same tolerance for a directory: people point this at the parent
+            # of ngelgames/ about as often as at ngelgames/ itself.
+            for cand in ('', 'ngelgames', os.path.join('files', 'ngelgames')):
+                if os.path.isdir(os.path.join(root, cand, 'AssetBundle')):
+                    self.prefix = cand.replace('\\', '/')
+                    break
+        else:
             raise SystemExit('client files not found: %s' % root)
+
+    @staticmethod
+    def _detect_prefix(names):
+        """Find the directory inside the archive that is the client root.
+
+        Zips of this tree turn up nested to whatever depth the person happened
+        to zip from -- `ngelgames/...`, `files/ngelgames/...`, or no prefix at
+        all.  Guessing one level deep gets `files/` and then every lookup
+        misses, which shows up in game as a 404 on assetList.json.gz and a
+        "Connection unstable" popup.  So anchor on a landmark instead of
+        counting components.
+        """
+        for n in names:
+            i = n.find('/AssetBundle/')
+            if i >= 0:
+                return n[:i]
+            if n.startswith('AssetBundle/'):
+                return ''
+        for marker in ('dnsinfo.json', 'assetList.json', 'real_serverinfo.json'):
+            for n in names:
+                if n == marker:
+                    return ''
+                if n.endswith('/' + marker):
+                    return n[:-(len(marker) + 1)]
+        return ''
 
     def _candidates(self, rel):
         rel = rel.replace('\\', '/').strip('/')
         yield rel
-        if self.zip is not None and self.prefix:
+        if self.prefix:
             yield '%s/%s' % (self.prefix, rel)
 
     def find(self, *parts):
@@ -379,6 +409,26 @@ def main():
     HTTP_PORT = args.http_port
     ASSETS = Assets(os.path.expanduser(args.client_files))
     log('assets  %s%s', ASSETS.root, ' (zip)' if ASSETS.zip is not None else '')
+    if ASSETS.prefix:
+        log('        rooted at "%s" inside the archive', ASSETS.prefix)
+
+    # Fail here rather than at runtime.  A wrongly-rooted archive still lets the
+    # client start -- patchinfo and serverinfo quietly fall back to the built-in
+    # defaults below -- and only dies later on a 404 for assetList.json.gz,
+    # which the game reports as "Connection unstable. Please check your
+    # network".  That is a miserable thing to debug from the game's side.
+    missing = [f for f in ('assetList.json.gz', 'dnsinfo.json',
+                           'AssetBundle/script/dungeon')
+               if ASSETS.find(f) is None]
+    if missing:
+        sys.exit(
+            'These files are missing from %s:\n    %s\n\n'
+            'That path should be the client\'s ngelgames directory, or a zip\n'
+            'containing it at any depth. If the zip looks right, it may be\n'
+            'truncated -- check its size against the download.\n'
+            'Serving it anyway would make the game fail with "Connection\n'
+            'unstable. Please check your network", which is not the problem.'
+            % (ASSETS.root, '\n    '.join(missing)))
 
     if not args.no_dns:
         t = threading.Thread(target=dns_serve, args=(args.bind, args.upstream_dns),
