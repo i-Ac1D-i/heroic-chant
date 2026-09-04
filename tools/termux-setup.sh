@@ -27,12 +27,12 @@ SERVER="$BASE/server"
 PKG_NAME="com.ngelgames.herocantare"
 
 # Google Drive file ids. A full URL in HC_*_URL wins over these.
-: "${HC_APK_ID:=1hayI4L--WCQbv4QEMLVLbg07Pkr-Sx8a}"
+: "${HC_APK_ID:=1PEEe0K29jxq0Fnpc92i3-Ztp95r-Uwcl}"
 : "${HC_FILES_ID:=1K-_zXE0j7W3zQ39cx2OML4iIa_h31jEd}"
 : "${HC_DB_ID:=1U3LYz0VUOmfTQcFQe3v7jqJliBxMJ6ci}"
 # spec.json + the JSON tables, from tools/make_mobile_bundle.py --no-db.
 # The phone cannot build these itself, so they have to be hosted.
-: "${HC_DATA_ID:=1PEEe0K29jxq0Fnpc92i3-Ztp95r-Uwcl}"
+: "${HC_DATA_ID:=1Mo2t-jzwaQeq3U2bkFKgmQQghBbLmgdN}"
 
 C_OK=$'\033[1;32m'; C_INFO=$'\033[1;36m'; C_WARN=$'\033[1;33m'
 C_ERR=$'\033[1;31m'; C_OFF=$'\033[0m'
