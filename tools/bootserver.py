@@ -147,6 +147,49 @@ def patchinfo(version):
     return obj
 
 
+def download_info(name):
+    """A patch manifest with the integrity checks relaxed.
+
+    Every entry carries a `crc` that Unity checks after downloading the bundle,
+    and it is *not* a CRC32 of the file on disk -- it is computed over the
+    decompressed bundle internally, so we cannot recalculate it for a bundle
+    that has been modified.  Which matters, because tools/patch_units.py exists
+    precisely to modify one: serving a patched `script/unit` against the
+    shipped manifest gets
+
+        CRC Mismatch. Provided 6ca27b35, calculated fa601253 from data.
+        Will not load AssetBundle 'unit'
+
+    and then a NullReferenceException in NMUnit.TextDecrypt, because the unit
+    tables never loaded.  On screen that looks like the download wedging at
+    "CollectionBook 85/227".
+
+    Unity skips the check when the crc is 0, which is what we want anyway: the
+    bytes come off local disk over loopback, so there is nothing to guard
+    against.  We also correct `mb` to whatever we are really serving, since a
+    patched bundle is rarely the same size as the original.
+    """
+    obj = ASSETS.read_json(name)
+    if obj is None:
+        return None
+    zeroed = resized = 0
+    for entry in obj.get('patchlist', []):
+        if entry.get('crc'):
+            entry['crc'] = 0
+            zeroed += 1
+        path = entry.get('path')
+        if path:
+            key = ASSETS.find('AssetBundle', path) or ASSETS.find(path)
+            if key is not None:
+                actual = ASSETS.size(key)
+                if entry.get('mb') != actual:
+                    entry['mb'] = actual
+                    resized += 1
+    log('  HTTP %s -> %d entries, %d crc cleared, %d resized',
+        name, len(obj.get('patchlist', [])), zeroed, resized)
+    return obj
+
+
 def serverinfo():
     obj = ASSETS.read_json('real_serverinfo.json') if ASSETS else None
     if obj is None:
@@ -206,6 +249,13 @@ class Handler(BaseHTTPRequestHandler):
         if name == 'real_serverinfo.json':
             log('  HTTP %s -> serverinfo (center %s:%d)', path, HOST, PORT)
             return self._send(serverinfo())
+
+        # Must come before the generic file branch below, which would otherwise
+        # serve the manifest verbatim, CRCs and all.
+        if name in ('downloadInfo.json', 'downloadInfoAndroid.json'):
+            obj = download_info(name)
+            if obj is not None:
+                return self._send(obj)
 
         # AssetBundle downloads.  The CDN path is
         #   /herocantare/assetbundle/aos/update_aos_<ver>_<n>/Android/<sub/path>

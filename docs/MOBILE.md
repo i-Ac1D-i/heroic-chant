@@ -46,7 +46,19 @@ Everything downstream is already ours. The patchinfo JSON *we serve* carries
 `cdninfo` (so the client downloads its own AssetBundles from us, into its own
 private directory, exactly as it did from the real CDN in 2023). That last part
 is what removes the root requirement: nothing ever reaches into `/data/data`
-by hand.
+by hand. (The client actually writes to
+`/storage/emulated/0/Android/data/com.ngelgames.herocantare/files/ngelgames/`
+— app-specific external storage, which needs no permission at all.)
+
+One wrinkle worth knowing: the `crc` on each manifest entry is *not* a CRC32 of
+the file on disk. Unity computes it over the decompressed bundle internally, so
+it cannot be recalculated for a bundle that has been modified — and
+`tools/patch_units.py` exists to modify one. Serving a patched `script/unit`
+against the shipped manifest gets a CRC mismatch, then a NullReferenceException
+in `NMUnit.TextDecrypt`, which on screen looks like the download wedging at
+"CollectionBook 85/227". Unity skips the check when the crc is 0, so the boot
+server zeroes them all — the bytes come off local disk over loopback, so there
+is nothing to guard against anyway.
 
 ---
 
@@ -179,6 +191,8 @@ random disconnects that look like server bugs.
 | Setup script: "Can't see your Downloads folder" | Run `termux-setup-storage` and tap Allow, then re-run |
 | Setup script: "ngelgames.zip not found" | It has to be in Downloads and its name has to start with `ngelgames` |
 | Asset download stalls partway | Usually free space. It needs ~2 GB beyond the zip |
+| Stuck at "CollectionBook 85/227" | A bundle failed its CRC check, so the unit tables never loaded and `NMUnit.TextDecrypt` threw. The boot server clears the manifest CRCs to prevent this — check `boot.log` says "crc cleared" |
+| Nothing downloads, client just sits there | It's waiting on the "New patch is available. Download now?" dialog. Tap OK |
 | `pkg install` fails | You're on the Play Store Termux. Uninstall it, get the F-Droid build |
 | Game connects then drops after a few minutes | Android killed Termux. `termux-wake-lock` and disable battery optimisation |
 
