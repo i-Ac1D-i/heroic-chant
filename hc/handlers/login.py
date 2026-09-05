@@ -58,6 +58,11 @@ async def login(s, a):
     account_id = a['AccountID'] or account_for_device(device_id)
     player = Player.load(account_id) or Player.create(account_id, device_id)
     player.d['last_login'] = datetime.utcnow().isoformat(timespec='seconds')
+    # A summon cube the client never opened would otherwise sit in
+    # NGDimensionGacha.vecSummon forever and block every future summon behind
+    # the client's "previous progress was not complete" check.  The hero was
+    # already granted when it was rolled, so nothing is lost by dropping it.
+    player.clear_gacha_results()
     player.save()
     s.account, s.player = account_id, player
 

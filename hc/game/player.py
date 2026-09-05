@@ -10,6 +10,7 @@ from datetime import datetime
 
 from .enums import ResourceType
 from ..data.tables import TABLES, to_int
+from ..settings import SETTINGS
 
 ACCOUNTS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -82,6 +83,27 @@ def _rk(t1, t2=-1, t3=-1):
     return '%d:%d:%d' % (t1, t2, t3)
 
 
+def _starting_wallet():
+    """The tables above, with whatever the dashboard has overridden on top.
+
+    Override keys are ``"<type1>"`` or ``"<type1>:<type2>"``; a value of 0
+    removes the entry, so a server owner can take the training wheels off as
+    well as pile more on.
+    """
+    wallet = dict(
+        [(_rk(t), v) for t, v in STARTING_RESOURCES.items()]
+        + [(_rk(t1, t2), v) for (t1, t2), v in STARTING_TYPED_RESOURCES.items()])
+    for key, value in (SETTINGS.get('account.starting_resources', {}) or {}).items():
+        parts = [int(x) for x in str(key).split(':')]
+        parts += [-1] * (3 - len(parts))
+        k = _rk(*parts[:3])
+        if int(value) <= 0:
+            wallet.pop(k, None)
+        else:
+            wallet[k] = int(value)
+    return wallet
+
+
 class Player(object):
     def __init__(self, data):
         self.d = data
@@ -115,16 +137,14 @@ class Player(object):
             # not implement yet.  157_800 is the UserRankEXP threshold for rank
             # 30, which lifts that cap and matches the generous starter package
             # above.  Set to 0 for a from-scratch progression run.
-            'exp': 157_800,
+            'exp': (157_800 if SETTINGS.get('account.starting_exp', -1) < 0
+                    else int(SETTINGS.get('account.starting_exp'))),
             'represent_profile': 5,
             'skin_id': 0,
             'reg_date': now,
             'last_login': now,
             'next_uid': 1,
-            'resources': dict(
-                [(_rk(t), v) for t, v in STARTING_RESOURCES.items()]
-                + [(_rk(t1, t2), v)
-                   for (t1, t2), v in STARTING_TYPED_RESOURCES.items()]),
+            'resources': _starting_wallet(),
             'units': [],
             'party': [],
             'cleared': {},          # dungeon_id -> star flag bitmask
@@ -134,7 +154,8 @@ class Player(object):
             'missions_done': [],
             'afk_claimed': now,     # City Search: last time idle rewards were taken
         })
-        pl.grant_starter_units()
+        if SETTINGS.get('account.grant_all_heroes', True):
+            pl.grant_starter_units()
         pl.save()
         return pl
 
@@ -281,26 +302,41 @@ class Player(object):
         rec['last'] = datetime.utcnow().isoformat(timespec='seconds')
         return rec['count']
 
-    def gacha_slots(self, banner=None):
-        """The cubes currently on the summon screen; rolled on first use and
-        re-rolled once every cube has been taken."""
-        from . import gacha as _g
-        banner = _g.HERO_BANNER if banner is None else banner
-        slots = self.d.setdefault('gacha_slots', {})
-        key = str(banner)
-        cur = slots.get(key)
-        if not cur or all(s.get('sold') for s in cur):
-            cur = _g.make_slots(banner)
-            slots[key] = cur
-        return cur
+    # NGDimensionGacha.vecSummon is the *result* of a summon waiting to be
+    # opened, not a shelf of cubes to browse.  DimensionGachaTabHeroUI.
+    # GachaSummon @0x1A3C4D0 walks vecSummon and refuses to summon again --
+    # "The previous progress of Portal was not complete." -- when entry 0
+    # exists and SoldOut is false, and NGDimensionGacha.GetGachaCount
+    # @0x1A51FD8 is nothing but vecSummon.Count.  So a summon puts one unsold
+    # cube here, BuyDimensionGachaReq marks it sold, and the next summon is
+    # free to run.
+    def gacha_slots(self, banner):
+        return self.d.setdefault('gacha_slots', {}).get(str(banner)) or []
+
+    def set_gacha_result(self, banner, unit_id, rareness):
+        """Record what a summon just rolled, as the one cube on offer."""
+        cube = {'slot': 0, 'gacha': int(banner), 'unit': int(unit_id),
+                'rareness': int(rareness), 'sold': False}
+        self.d.setdefault('gacha_slots', {})[str(banner)] = [cube]
+        return cube
 
     def take_gacha_slot(self, banner, slot_id):
-        """Mark one cube taken; returns it, or None if it is gone/unknown."""
+        """Mark one cube opened; returns it, or None if it is gone/unknown."""
         for s in self.gacha_slots(banner):
             if int(s['slot']) == int(slot_id) and not s.get('sold'):
                 s['sold'] = True
                 return s
         return None
+
+    def clear_gacha_results(self, banner=None):
+        """Drop unopened cubes.  Done at login and whenever the summon screen
+        is reopened, so a result the client never acknowledged cannot wedge
+        every future summon behind the "previous progress" check."""
+        slots = self.d.setdefault('gacha_slots', {})
+        if banner is None:
+            slots.clear()
+        else:
+            slots.pop(str(banner), None)
 
     # -- shop --------------------------------------------------------------
     def shop_bought(self, goods_uid):

@@ -17,6 +17,7 @@ import random
 
 from ..data.tables import TABLES, to_int
 from ..protocol.dto import TYPES
+from ..settings import SETTINGS
 from . import state
 
 MILLION = 1_000_000
@@ -41,6 +42,11 @@ def _pool(group_id):
 
 def cost(gacha_id, count):
     """(type1, type2, amount) for a 1x or 10x pull, or None if the banner is free."""
+    over = SETTINGS.get('gacha.cost', {}).get(str(int(gacha_id)))
+    if over:
+        key = 'ten' if count >= 10 else 'single'
+        return (int(over.get('type1', -1)), int(over.get('type2', -1)),
+                int(over.get(key, 0)))
     row = _gacha_row('GachaList', gacha_id)
     if row is None:
         return None
@@ -79,6 +85,14 @@ def roll(gacha_id, count=1, rng=random):
     weights = weights[:len(rows)]
     if sum(weights) <= 0:
         weights = [1] * len(rows)
+    # A dashboard override replaces the table weights, keyed by rareness so it
+    # survives the rows being in a different order than you expect.
+    over = SETTINGS.get('gacha.rates', {}).get(str(int(gacha_id)))
+    if over:
+        weights = [max(int(over.get(str(to_int(r.get('Rareness'), 0)), 0)), 0)
+                   for r in rows]
+        if sum(weights) <= 0:
+            weights = [1] * len(rows)
 
     out = []
     for _ in range(max(int(count), 1)):
@@ -89,6 +103,74 @@ def roll(gacha_id, count=1, rng=random):
         unit_id = rng.choice(pool)
         out.append((unit_id, to_int(row.get('Rareness'), 0)))
     return out
+
+
+# A duplicate at this rarity or above pays out the hero's *own* Memory
+# (ResourceType 16, Type2 = unit id -- "Bam's Memory") rather than a generic
+# Memory Stone, which is what the live game did and what the shards are
+# actually for.
+OWN_MEMORY_FROM_RARENESS = 2        # 2 = SS, 3 = SSS
+OWN_MEMORY_AMOUNT = 40
+
+
+def _own_memory(unit_id):
+    """The hero-specific shard reward for a duplicate.
+
+    40 is not invented: `GradeUpMaterial` charges exactly 40 of
+    ResourceType 16 / <unitID> to take that hero from 2 stars to 3 (then 80,
+    120, 160 for the grades above), and `GachaUnitPieceRatioView` -- the only
+    other gacha table that pays this resource -- also pays 40 a time.  So one
+    SS duplicate is worth one star-up, which is a defensible reading of a
+    number the retail server never wrote down.  INFERRED; change
+    OWN_MEMORY_AMOUNT, or override it per rarity in the dashboard.
+    """
+    return [(16, int(unit_id), -1, OWN_MEMORY_AMOUNT)]
+
+
+def grant(player, unit_id, rareness):
+    """Hand over what a summon rolled.  Returns (unit or None, [reward, ...]).
+
+    A hero you already own does not become a second copy of that hero -- it
+    converts to shards.  Which shards depends on how good the hero was:
+
+    * SS and above -> that hero's own Memory (16 / unit id), see `_own_memory`
+    * below that   -> `DecompPieceReturn`, the client's own conversion table,
+                      keyed by the duplicate's rarity:
+                        Rareness 0 (A) -> ResourceType 45 / 1  x1
+                        Rareness 1 (S) -> ResourceType 45 / 2  x1
+
+    `DecompPieceReturn` has no row for rareness 3 at all, so before the
+    SS-and-above rule an SSS duplicate paid out nothing.
+
+    A dashboard override (`gacha.duplicate`, keyed by rareness) replaces either
+    branch.  Write `"unit"` in the Type2 slot to mean "the hero that was
+    actually summoned", which is the only way a fixed table can express a
+    hero-specific reward.
+    """
+    owned = any(int(u['id']) == int(unit_id) for u in player.d['units'])
+    if not owned or SETTINGS.get('gacha.duplicates_as_units', False):
+        return player.add_unit(unit_id, rareness=rareness), []
+
+    over = SETTINGS.get('gacha.duplicate', {}).get(str(int(rareness)))
+    if over:
+        out = []
+        for row in over:
+            t1, t2, t3, amount = list(row) + [-1] * (4 - len(row))
+            t2 = int(unit_id) if str(t2).lower() == 'unit' else int(t2)
+            out.append((int(t1), t2, int(t3), int(amount)))
+        return None, out
+
+    if int(rareness) >= OWN_MEMORY_FROM_RARENESS:
+        return None, _own_memory(unit_id)
+
+    row = TABLES.row('DecompPieceReturn', 'Rareness', int(rareness))
+    if row is None:
+        return None, []
+    t1 = to_int(row.get('ResourceType1'), -1)
+    if t1 < 0:
+        return None, []
+    return None, [(t1, to_int(row.get('ResourceType2'), -1), -1,
+                   to_int(row.get('ResourceVal1'), 0))]
 
 
 def rates(gacha_id):
@@ -108,46 +190,38 @@ def rates(gacha_id):
 
 
 # --------------------------------------------------------------------------
-# Dimension Gacha slots
+# Dimension Gacha
 #
-# The summon screen is a *slot* gacha: NGDimensionGacha.vecSummon holds the
-# cubes on screen, and tapping one sends BuyDimensionGachaReq(GachaID, slotID).
-# With an empty vecSummon there is nothing to tap, which is why "Touch!" did
-# nothing.  Slots are pre-rolled and persisted so the same cubes stay put
-# between sessions until they are actually bought.
+# vecSummon carries the outcome of a summon, waiting for the client to open
+# it.  Read off the client rather than guessed:
+#
+#   NGDimensionGacha.GetGachaCount        @0x1A51FD8  return vecSummon.Count
+#   DimensionGachaTabHeroUI.GachaSummon   @0x1A3C4D0  if vecSummon.Count >= 1
+#                                                     && !vecSummon[0].SoldOut
+#                                                     -> "The previous progress
+#                                                     of Portal was not
+#                                                     complete." and no packet
+#                                                     is sent
+#
+# So the cycle is: summon -> one unsold cube -> BuyDimensionGachaReq opens it
+# -> sold, and the next summon is allowed.  An earlier version pre-rolled three
+# cubes at login, hit that refusal, and concluded vecSummon had to stay empty
+# forever; that read the symptom right and the rule wrong.
 
-SLOTS = 3
-
-
-def make_slots(banner=HERO_BANNER, count=SLOTS, rng=random):
-    """Pre-roll `count` cubes for a banner: [{slot, gacha, unit, rareness}]."""
-    out = []
-    for slot, (unit_id, rare) in enumerate(roll(banner, count, rng)):
-        out.append({'slot': slot, 'gacha': int(banner),
-                    'unit': int(unit_id), 'rareness': int(rare),
-                    'sold': False})
-    return out
-
-
-# ------------------------------------------------------------------- DTOs --
+BANNERS = (1, 2)
 
 
-def dimension_gacha(player, gacha_ids=(1, 2)):
-    """NGLogInAck01.vecDimensionGacha -- the summon screen's banners.
+def dimension(player, gid):
+    """One NGDimensionGacha: the banner plus whatever cube is waiting on it."""
+    _, last = player.summon_count(gid)
+    return TYPES['NGDimensionGacha'](
+        ID=int(gid), tmRenewLastGacha=last,
+        vecSummon=[summon_slot(s) for s in player.gacha_slots(gid)])
 
-    vecSummon is the list of cubes actually drawn on screen; an empty one
-    renders a banner you cannot interact with, and leaves the "(used/max)"
-    label as a literal "({0}/{1})".
-    """
-    out = []
-    for gid in gacha_ids:
-        _, last = player.summon_count(gid)
-        # vecSummon stays empty while idle: a cube left unsold here makes the
-        # client refuse to open the screen with "the previous progress of
-        # Portal was not complete".
-        out.append(TYPES['NGDimensionGacha'](
-            ID=int(gid), tmRenewLastGacha=last, vecSummon=[]))
-    return out
+
+def dimension_gacha(player, gacha_ids=BANNERS):
+    """NGLogInAck01.vecDimensionGacha -- the summon screen's banners."""
+    return [dimension(player, gid) for gid in gacha_ids]
 
 
 def summon_slot(s):

@@ -101,13 +101,20 @@ class Session(object):
         except asyncio.CancelledError:
             pass
 
+    @staticmethod
+    def _brief(args, limit=300):
+        """Decoded packet args, short enough to sit on a log line.
+
+        Some requests carry the whole roster (TotalUnitPowerInfoReq is 1.6 KB
+        of unit ids), so this is truncated rather than dumped.
+        """
+        text = repr({k: v for k, v in args.items() if k != '_trailing'})
+        return text if len(text) <= limit else text[:limit] + '...'
+
     async def _dispatch(self, pid, body):
         if pid < 0:
             return await self._control(pid, body)
         fn = HANDLERS.get(pid)
-        if fn is None:
-            log.warning('C2S %s -- no handler (%d body bytes)', packet_name(pid), len(body))
-            return
         try:
             args = decode_packet(pid, body)
         except Exception:
@@ -116,7 +123,15 @@ class Session(object):
         if args.get('_trailing'):
             log.warning('%s: %d trailing bytes -- codec may be wrong',
                         packet_name(pid), args['_trailing'])
+        if fn is None:
+            # Decode it anyway. spec.json knows all 859 layouts, and the
+            # arguments are the whole point of a no-handler line -- they say
+            # what the client was actually asking for.
+            log.warning('C2S %s -- no handler (%d body bytes) %s',
+                        packet_name(pid), len(body), self._brief(args))
+            return
         log.info('C2S %s', packet_name(pid))
+        log.debug('      args %s', self._brief(args))
         try:
             await fn(self, args)
         except Exception:

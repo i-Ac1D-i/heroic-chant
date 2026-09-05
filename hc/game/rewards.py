@@ -12,10 +12,14 @@ import random
 from collections import defaultdict
 
 from ..data.tables import TABLES, to_int
+from ..settings import SETTINGS
 
 
 def roll(dungeon_id, first_clear, rng=random):
     """Return [(type1, type2, type3, amount), ...] for one clear of a stage."""
+    over = SETTINGS.get('rewards.stage_overrides', {}).get(str(int(dungeon_id)))
+    if over is not None:
+        return _scaled([tuple(int(x) for x in r) for r in over], first_clear)
     rows = [r for r in TABLES.clear_rewards(dungeon_id)
             if bool(to_int(r['firstClear'], 0)) == bool(first_clear)]
     out, groups = [], defaultdict(list)
@@ -30,7 +34,19 @@ def roll(dungeon_id, first_clear, rng=random):
         if sum(weights) <= 0:
             continue
         out.append(_as_reward(rng.choices(rows_in_group, weights=weights, k=1)[0]))
-    return out
+    return _scaled(out, first_clear)
+
+
+def _scaled(rewards, first_clear):
+    """Apply the dashboard's drop multipliers.  Amounts stay whole and never
+    round a real drop away to nothing."""
+    mult = float(SETTINGS.get('rewards.multiplier', 1.0) or 1.0)
+    if first_clear:
+        mult *= float(SETTINGS.get('rewards.first_clear_multiplier', 1.0) or 1.0)
+    if mult == 1.0:
+        return rewards
+    return [(t1, t2, t3, max(int(round(v * mult)), 1 if v > 0 else 0))
+            for t1, t2, t3, v in rewards]
 
 
 def _as_reward(r):
