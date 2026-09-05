@@ -356,3 +356,203 @@ Also:
 - `tools/gen_enums.py` -- enum generation is reproducible now, and pulls in the
   client's real 453-value `NMError`
 - game-derived data is gitignored; the tools rebuild all of it
+
+## Fifth pass: the phone installer, actually run
+
+`tools/termux-setup.sh` was the one thing here a stranger runs unattended, on
+hardware we don't have, and it had never been executed start to finish -- only
+`bash -n`'d. `tools/test-termux-setup.sh` now rehearses it on a desktop: every
+Termux-only command stubbed onto `PATH`, `HOME` in a sandbox, downloads off a
+local range-capable HTTP server, and the "repo" a throwaway clone of the
+working tree. Seven scenarios, 40 assertions. Run it before touching the
+installer.
+
+Doing that turned up four real bugs, three of them in the shipped script.
+
+### `read` does not work in a `curl | bash` script
+
+The advertised install is a pipe, so **stdin is the script itself**. When the
+script hit
+
+```sh
+read -r -p "  Press Enter once the install has finished... " _
+```
+
+bash had already parsed the enclosing `if ... fi` compound, so `read` consumed
+whatever line came next in the file and returned immediately. The prompt never
+waited. Reproduced exactly: pipe a script with `echo 1; read x; echo 2` into
+bash and line 2 vanishes.
+
+Today the line after that `fi` happens to be blank, so nothing else broke --
+but the next candidate is `cat > "$BASE/start.sh" <<'LAUNCHER'`, and eating
+*that* would dump the entire launcher body into the live shell. It was one
+edit away from being much worse.
+
+Now it prompts on `/dev/tty`, and where there is no terminal (or
+`HC_NONINTERACTIVE=1`) it polls `installed()` for up to five minutes instead.
+Either way it confirms the package actually arrived before moving on.
+
+The whole script body is also wrapped in `{ ... }` now, which forces bash to
+parse the entire file before running any of it -- so a connection that drops
+mid-download can't leave a half-executed install.
+
+### Downloads did not resume across runs
+
+`need() { [ ! -s "$1" ]; }` treated any non-empty file as finished. A 2 GB
+transfer killed at 300 MB left a non-empty `ngelgames.zip`; the next run said
+"client files already here", skipped `verify` entirely, and handed a truncated
+zip to the boot server. `docs/MOBILE.md` claimed resume worked; `curl -C -`
+only ever resumed within a single run's retries.
+
+Downloads now land on `<dest>.part` and are renamed only once curl says it is
+done, so a `.part` is unambiguously a resume point. `have()` replaced `need()`
+and takes a minimum size, and `verify()` enforces the same floor -- a truncated
+zip still starts with `PK`, so magic bytes alone wave half a file through.
+Floors are `HC_FILES_MIN` / `HC_DB_MIN` / `HC_DATA_MIN` / `HC_APK_MIN`.
+
+Google Drive does answer `206 Partial Content`, verified against all three
+large files, so the resume path is real and not theoretical.
+
+### `start.sh` exposed the game server to the LAN
+
+`config.BIND_HOST` defaults to `0.0.0.0` and `start.sh` never passed `--host`.
+The boot shim already passed `--bind 127.0.0.1`; the game server was missed. On
+a phone that put a save server with no authentication, which takes every packet
+on trust, on whatever wifi you happened to be on. Both now bind loopback.
+
+### `kill 0` in start.sh's exit trap
+
+The launcher's cleanup was `kill 0`, which signals the entire process group.
+Run from an interactive Termux prompt that is exactly the two servers, which is
+why it looked fine. Launched from anything else -- a script, a test harness --
+it takes the parent down with it. Found because it killed the test harness
+mid-run and looked like a hang. Now it kills the two recorded child pids.
+
+### And one in the harness worth remembering
+
+The Windows fallback for "stop the servers" was
+
+```
+Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'bootserver.py|hc\.main' }
+```
+
+which matches **the powershell process running that query**, because the
+pattern is right there in its own command line. It killed the whole shell tree.
+Filter on `Name -eq 'python.exe'` first.
+
+## Sixth pass: the summon crash, and a config dashboard
+
+### The Dimension Gacha wedge
+
+Summoning showed the hero, then a *"The Dimension has dissipated"* popup, then a
+"connecting to server" overlay over the OK button that could not be dismissed --
+the app had to be restarted, once per pull.
+
+The cause, from the client's own log (`adb logcat -d | grep Unity`):
+
+```
+RmiSend : 30062   DimensionGachaTabHeroUI:GachaSummon()
+NGNetGameServer OK, Object reference not set to an instance of an object.
+```
+
+`JoinDimensionGachaAck` was throwing inside the client. `GachaSummon`
+@0x1A3C3E4 opens with `if (bSendPacket) return;` and that flag is only cleared
+once the Ack is fully processed, so a throw mid-Ack kills the summon button for
+the rest of the session. That is the whole wedge.
+
+**Proving the Ack was the trigger took a delay, not a guess.** The device clock
+and the server clock are ~1.75 s apart, which is the same order as the gap
+being measured, so the logs could be read either way. `HC_GACHA_ACK_DELAY=8`
+holds the Ack back; the throw moved with it, landing 8.09 s after the request.
+Worth remembering: **never compare a logcat timestamp with a server timestamp
+without establishing the offset first.**
+
+What it was *not* -- each ruled out by a live test, all of them plausible:
+
+* `_GachaChoiceCubeInfo` (a previous session had invented values for it)
+* `vecAddUnitInfo`
+* `vecChangeDimensionGacha`
+* the reward contents
+
+What works is answering a summon with the same Ack *shape* as a screen-open:
+the whole wallet instead of a delta, and `NGGachaDaySummonsCount.GachaID = -1`.
+Those two things have never been varied independently, so that is exactly where
+the next attempt should start. `HC_GACHA_RICH_ACK=1` restores the fuller Ack for
+whoever picks it up. Remaining cost: a genuinely *new* hero is not announced, so
+it only shows after a relogin. Duplicates are unaffected.
+
+Still open: the "dissipated" popup itself. It is now dismissable and the pull is
+saved, so it is cosmetic.
+
+### Two real bugs found on the way
+
+**Duplicates were minting second copies of heroes.** With a full roster every
+pull is a duplicate, and the test account had drifted to 145 units for 138
+heroes. `DecompPieceReturn` is the conversion table, keyed by the duplicate's
+rarity (rareness 0/1/2 -> ResourceType 45/1, 45/2, 45/3, x1). `gacha.grant`
+now checks ownership.
+
+**`vecSummon` is not "always empty".** The handoff said it was, because
+pre-filling it produced *"The previous progress of Portal was not complete."*
+The actual rule, from `GachaSummon` @0x1A3C4D0, is that the client refuses only
+when `vecSummon[0]` exists **and `SoldOut` is false** -- an unclaimed cube from
+a previous summon. `NGDimensionGacha.GetGachaCount` @0x1A51FD8 is literally
+`vecSummon.Count`. So vecSummon is the *result* of a summon awaiting collection,
+and unopened cubes are now dropped at login and on screen-reopen so a stale one
+cannot block every future summon.
+
+### tools/disasm.py
+
+All of the above came from a new tool: `python tools/disasm.py Class.Method`
+disassembles any client method with `bl` targets resolved to names through
+dump.cs's RVA table and string-table ids annotated inline. `dump.cs` has 103,639
+empty method bodies, so "what does the client actually do when..." always ended
+in hand-disassembly before this.
+
+### The dashboard
+
+`hc/webui/` -- stdlib `http.server` in a daemon thread beside the asyncio loop,
+a JSON API plus one static page, on 127.0.0.1:8099 by default.
+
+`hc/settings.py` is the half that matters to game code: one JSON file, every key
+with a default, read *at the point of use* so a change applies on the next
+packet with no restart. Wired into gacha rates/cost/duplicates, stage reward
+multipliers and per-stage overrides, new-account starting resources and roster,
+and equipment consumption.
+
+Saves are editable, exportable and importable as JSON, and an import can bind a
+device id in the same step -- which is the actual "move my account to a new
+phone" path. Device-to-account mapping already existed in `accounts/index.json`;
+the dashboard just surfaces it.
+
+It has no authentication and can rewrite any save, so it refuses a non-loopback
+bind unless `dashboard.token` is set. `tools/test_dashboard.py` covers all of
+it against a throwaway accounts directory, including that refusal and that
+static serving cannot escape `static/`.
+
+### Item names, and hero-specific duplicate shards
+
+The wallet editor showed raw `type1:type2:type3` keys, which is unusable --
+`16:41:-1` is Bam's Memory and `5:1403:-1` is a particular sword.
+**`ResourceTable`** is the client's own answer: 4,650 rows of
+`(ResourceID, Type2, Type3) -> NameID`, covering 148 of the 152 keys in a real
+save. `itemList` and `runeList` fill the rest; anything still unknown degrades
+to `type N / M` rather than a guess. `TABLES.resource_name()` is the lookup;
+the account payload carries names for its own keys, and `/api/resources?q=`
+searches the catalogue for the add-an-item picker (4,650 rows is too much to
+push to the browser on load).
+
+That exposed a bug in the account summary: **type 0 is Gold, type 4 is User
+EXP**, and it had been reporting User EXP as gold.
+
+**SS and SSS duplicates now pay out the hero's own Memory** (ResourceType 16
+keyed by unit id) instead of a generic Memory Stone. The amount, 40, is not
+invented: `GradeUpMaterial` charges exactly 40 of `16 / <unitID>` to take that
+hero from 2 stars to 3, and `GachaUnitPieceRatioView` -- the only other gacha
+table paying this resource -- also pays 40. So one SS duplicate is worth one
+star-up. `DecompPieceReturn` has no rareness-3 row at all, so before this an
+SSS duplicate paid out *nothing*.
+
+The dashboard override (`gacha.duplicate`) accepts the string `"unit"` in the
+Type2 slot, meaning "the hero that was actually summoned" -- the only way a
+fixed table can express a hero-specific reward.

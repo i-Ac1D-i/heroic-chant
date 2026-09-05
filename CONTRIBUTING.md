@@ -60,6 +60,8 @@ hc/
     errors.py         Ack error codes
 
   handlers/           one file per feature, this is where you'll be
+  settings.py         live, dashboard-editable knobs (see below)
+  webui/              the config dashboard: a JSON API + one static page
 tools/                everything that reads the APK or drives a device
 ```
 
@@ -204,9 +206,32 @@ something weird.
   owns** (`SO_REUSEADDR`). Both servers bind exclusively now, but if something
   behaves like it's running old code, check for orphan processes first.
 
+## Settings vs config
+
+Two different things, and putting something in the wrong one is annoying to
+undo:
+
+* **`hc/config.py`** is what has to be right for the client to talk to us at
+  all -- ports, the numeric string-table id it feeds to `int.Parse`. Env vars,
+  read once at startup. Getting one wrong breaks login.
+* **`hc/settings.py`** is what a server owner may legitimately want to change:
+  pull rates, drop multipliers, what a duplicate hero converts to, what a new
+  account starts with. Backed by `server/settings.json`, edited through the
+  dashboard, and **read at the point of use** -- never cache a `SETTINGS.get`
+  at import time or the dashboard will appear to do nothing until a restart.
+
+Adding a knob is three steps: a default in `settings.DEFAULTS` (which doubles
+as its documentation), a `SETTINGS.get` where the value is used, and a control
+in `hc/webui/static/index.html`. Anything with a default already shows up in
+the dashboard's Raw settings tab for free.
+
 ## Testing
 
-`python tools/selftest.py` before you push. It's not a unit test suite, it's an
+`python tools/selftest.py` before you push.
+`python tools/test_dashboard.py` if you touched settings or the dashboard --
+it drives the real HTTP API against a throwaway accounts directory and checks
+that a setting changed through the API actually changes what the game does.
+`bash tools/test-termux-setup.sh` if you touched the installer. It's not a unit test suite, it's an
 end-to-end run against a real socket, which for this project catches more.
 
 Beyond that, test in the game. Most bugs here are "the client didn't like

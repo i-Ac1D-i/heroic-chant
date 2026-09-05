@@ -57,6 +57,29 @@ it and tells the client where your server lives.
 If you're on the emulator setup already, `python tools/resume.py` brings
 everything back up in one go.
 
+## Configuring it
+
+The server comes with a dashboard, on **http://127.0.0.1:8099** whenever it is
+running:
+
+* edit any save -- currencies, items, roster, rank -- with every item shown by
+  its real name and a search box to find one, and **export/import** a save as
+  JSON to move a player to another device
+* summon rates, summon cost, and what a duplicate hero converts to
+* stage drop multipliers and per-stage overrides
+* what a brand new account starts with
+* which device id owns which save
+
+Changes apply on the next packet; nothing restarts. Only what you change is
+written, to `server/settings.json`. Delete that file to go back to stock.
+
+Every device that connects gets **its own account**, so several people can play
+against one server without sharing a save.
+
+The dashboard has no password and can rewrite any save, so it binds loopback
+only; set `dashboard.token` before exposing it anywhere else. `--web-port` moves
+it, `--no-web` turns it off.
+
 ## Running it on a phone, with no PC at all
 
 There's a second route where the game and the server both live on the phone and

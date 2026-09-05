@@ -132,7 +132,16 @@ data tables and the game itself, then installs the game if you don't already
 have it (you tap Install once, on Android's own dialog) and runs a self-test.
 
 Anything already sitting in your Downloads folder gets used instead of being
-re-downloaded, and any download that dies partway resumes on the next run.
+re-downloaded, and any download that dies partway resumes on the next run — a
+transfer in progress lives at `<name>.part` and only takes its real name once
+curl says it finished, so a half-file can never be mistaken for a done one.
+Each download also has to clear a minimum size (`HC_FILES_MIN` and friends),
+because a truncated zip still starts with a valid zip header and would
+otherwise sail through to a confusing failure much later.
+
+If you are driving this from a script rather than sitting in front of it, set
+`HC_NONINTERACTIVE=1` and it will poll for the game to appear instead of
+waiting on a keypress.
 
 Then:
 
@@ -198,6 +207,36 @@ tail -f ~/heroic-chant/logs/game.log
 
 ---
 
+## Changing the setup script
+
+`tools/termux-setup.sh` is the one thing here that strangers run unattended, on
+hardware we don't have. There is a rehearsal for it that runs on a desktop:
+
+```bash
+bash tools/test-termux-setup.sh
+```
+
+It stubs every Termux-only command onto `PATH`, points `HOME` at a sandbox,
+serves the downloads off a local range-capable HTTP server, and clones a
+throwaway copy of your *working tree* — so it tests the script you are editing,
+not the one on GitHub. It then walks seven scenarios: clean install, two kinds
+of re-run, a download that died halfway, a truncated file already sitting at
+its final name, the patched-APK install prompt, and finally `start.sh` actually
+bringing both servers up. It needs `herocantare.db` and `files/ngelgames/` in
+the parent directory (`HC_TEST_DB` / `HC_TEST_FILES` to point elsewhere) and it
+uses ports 8080 and 21010, so stop anything already on them.
+
+Two things about that script are easy to break by accident:
+
+- **It is run as `curl … | bash`, so stdin is the script itself.** A plain
+  `read` does not wait for the user — it eats the next line of the file off
+  stdin and carries on. Prompt on `/dev/tty` instead. This is also why the
+  whole body is wrapped in `{ … }`: that forces bash to parse the entire file
+  before running any of it, so a connection that drops mid-download can't
+  leave a half-executed install.
+- **A `.sh` file with CRLF endings will not run on Android.** `.gitattributes`
+  forces LF; don't fight it.
+
 ## Pointing a phone at a PC instead
 
 If you'd rather run the server on a PC and just use the patched APK on the
@@ -212,3 +251,43 @@ gives you 48 characters to play with — plenty for any LAN address, but the too
 will tell you if you somehow overflow it. Then run the server as in
 [TESTING.md](TESTING.md), with `--http-port 8080`, and skip all the DNS and
 hosts-file steps: the APK already knows where to look.
+
+---
+
+## The dashboard
+
+`start.sh` also brings up a config dashboard at **http://127.0.0.1:8099** —
+open it in the phone's browser while the server is running. It is where you
+change anything that is meant to be changed:
+
+| Tab | What it does |
+|---|---|
+| Accounts | Edit a save: nickname, rank EXP, every currency and item **by name** — search "Bam's Memory" rather than guessing at `16:41:-1` — and the roster. **Export** writes a `heroic-chant-<id>.json` you can move to another phone; **Import** reads one back, optionally binding it to a device id in the same step |
+| Summoning | Pull rates per rarity per banner, what a duplicate hero converts to (SS and above give that hero's own Memory), and the cost of a summon |
+| Rewards | Stage drop multipliers, and per-stage overrides |
+| New accounts | What a brand new player starts with, and whether they get the full roster |
+| Devices | Which device id owns which save |
+
+Changes take effect on the next packet — nothing needs restarting. Only what
+you actually change is written, into `server/settings.json`; delete that file
+and everything is back to stock.
+
+### Several people, one server
+
+Every device that connects is handed **its own account**, keyed by the device
+id the client sends. Nobody shares a save unless you deliberately point two
+devices at the same account id on the Devices tab.
+
+Moving a save to a new phone is Export on the old one, then Import on the new
+one with the new device's id filled in.
+
+> **The dashboard has no password and can rewrite any save**, so it binds
+> loopback only. That is exactly right for the phone-only setup, where the only
+> browser that can reach it is the one on the same phone. To reach it from
+> another machine you must set `dashboard.token` first — the server refuses a
+> non-loopback bind without one — and then append `?token=…` to the URL.
+
+```bash
+python -m hc.main --web-port 9000     # somewhere else
+python -m hc.main --no-web            # not at all
+```
