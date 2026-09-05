@@ -1,0 +1,654 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heroic Chant</title>
+<style>
+  :root {
+    --bg:#12131a; --panel:#1b1d27; --panel2:#232634; --line:#2f3446;
+    --ink:#e7e9f0; --dim:#9aa1b4; --accent:#7aa2ff; --good:#5fd08a;
+    --warn:#f0b45f; --bad:#f0685f; --mono:ui-monospace,"Cascadia Mono",Consolas,monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f4f5f8; --panel:#fff; --panel2:#eef0f5; --line:#d8dbe4;
+            --ink:#1a1d26; --dim:#5d6579; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  header { position:sticky; top:0; z-index:5; background:var(--panel);
+           border-bottom:1px solid var(--line); padding:10px 16px;
+           display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0; font-weight:650; letter-spacing:.2px; }
+  header .status { color:var(--dim); font-size:12px; font-family:var(--mono); }
+  nav { display:flex; gap:4px; flex-wrap:wrap; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--dim);
+               padding:6px 12px; border-radius:7px; cursor:pointer; font-size:13px; }
+  nav button:hover { color:var(--ink); background:var(--panel2); }
+  nav button.on { background:var(--accent); border-color:var(--accent); color:#0d1020; font-weight:600; }
+  main { padding:16px; max-width:1100px; margin:0 auto; }
+  section { display:none; }
+  section.on { display:block; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:14px 16px; margin-bottom:14px; }
+  .card h2 { font-size:13px; margin:0 0 4px; text-transform:uppercase;
+             letter-spacing:.6px; color:var(--dim); font-weight:650; }
+  .card p.help { margin:0 0 12px; color:var(--dim); font-size:12.5px; }
+  label { display:block; font-size:12px; color:var(--dim); margin-bottom:3px; }
+  input, select, textarea { width:100%; background:var(--panel2); color:var(--ink);
+    border:1px solid var(--line); border-radius:7px; padding:7px 9px;
+    font:inherit; }
+  textarea { font-family:var(--mono); font-size:12px; min-height:150px; resize:vertical; }
+  input:focus, select:focus, textarea:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:10px; }
+  .row > div { flex:1 1 150px; min-width:0; }
+  button.act { background:var(--accent); color:#0d1020; border:none; border-radius:7px;
+               padding:8px 14px; font:inherit; font-weight:600; cursor:pointer; }
+  button.act:hover { filter:brightness(1.08); }
+  button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line);
+                 border-radius:7px; padding:8px 14px; font:inherit; cursor:pointer; }
+  button.ghost:hover { background:var(--panel2); }
+  button.danger { border-color:var(--bad); color:var(--bad); }
+  .tablewrap { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line);
+           white-space:nowrap; }
+  th { color:var(--dim); font-size:11.5px; text-transform:uppercase; letter-spacing:.5px; }
+  tr.pick:hover td { background:var(--panel2); cursor:pointer; }
+  tr.sel td { background:color-mix(in srgb, var(--accent) 18%, transparent); }
+  code, .mono { font-family:var(--mono); font-size:12px; }
+  .pill { display:inline-block; background:var(--panel2); border:1px solid var(--line);
+          border-radius:20px; padding:1px 9px; font-size:11.5px; font-family:var(--mono); }
+  #toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%);
+           background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--good);
+           border-radius:8px; padding:10px 16px; box-shadow:0 8px 26px #0006;
+           opacity:0; pointer-events:none; transition:opacity .18s; max-width:90vw; }
+  #toast.show { opacity:1; }
+  #toast.err { border-left-color:var(--bad); }
+  .grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; }
+  .muted { color:var(--dim); }
+  .right { text-align:right; }
+  details summary { cursor:pointer; color:var(--dim); font-size:12.5px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Heroic Chant</h1>
+  <nav>
+    <button data-tab="accounts" class="on">Accounts</button>
+    <button data-tab="gacha">Summoning</button>
+    <button data-tab="rewards">Rewards</button>
+    <button data-tab="newacct">New accounts</button>
+    <button data-tab="devices">Devices</button>
+    <button data-tab="raw">Raw settings</button>
+  </nav>
+  <span class="status" id="status"></span>
+</header>
+
+<main>
+
+<!-- ------------------------------------------------------------ accounts -->
+<section id="accounts" class="on">
+  <div class="card">
+    <h2>Accounts</h2>
+    <p class="help">One save per account. Pick one to edit its wallet and roster,
+      or export it to move to another device.</p>
+    <div class="tablewrap">
+      <table id="acctTable">
+        <thead><tr><th>ID</th><th>Name</th><th>Heroes</th><th>Wallet rows</th>
+          <th>Devices</th><th>Last login</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="ghost" id="reloadAccts">Reload</button>
+      <button class="ghost" id="importBtn">Import a save…</button>
+      <input type="file" id="importFile" accept="application/json" hidden>
+    </div>
+  </div>
+
+  <div class="card" id="editor" hidden>
+    <h2>Account <span id="edId" class="pill"></span></h2>
+    <div class="row">
+      <div><label>Nickname</label><input id="edNick"></div>
+      <div><label>Rank EXP</label><input id="edExp" type="number"></div>
+      <div style="flex:0 0 auto">
+        <button class="act" id="saveProfile">Save</button>
+      </div>
+      <div style="flex:0 0 auto">
+        <button class="ghost" id="exportBtn">Export</button>
+      </div>
+      <div style="flex:0 0 auto">
+        <button class="ghost danger" id="deleteBtn">Delete</button>
+      </div>
+    </div>
+
+    <h2 style="margin-top:16px">Currencies &amp; inventory</h2>
+    <p class="help">Absolute values. Set one to 0 to remove it. Keys are
+      <code>type1:type2:type3</code> — most currencies only use type1.</p>
+    <div class="row">
+      <div><label>Filter what you have</label><input id="resFilter" placeholder="e.g. Memory, Shard, Gold"></div>
+    </div>
+    <div class="row">
+      <div style="flex:2 1 260px"><label>Add something — search by name</label>
+        <input id="resSearch" placeholder="e.g. Bam's Memory" autocomplete="off">
+        <select id="resPick" size="6" hidden style="margin-top:4px"></select></div>
+      <div><label>Key</label><input id="resKey" class="mono" placeholder="0:-1:-1"></div>
+      <div><label>Amount</label><input id="resVal" type="number" placeholder="0"></div>
+      <div style="flex:0 0 auto"><button class="ghost" id="resAdd">Set</button></div>
+    </div>
+    <div class="tablewrap" style="max-height:320px; overflow-y:auto">
+      <table id="resTable">
+        <thead><tr><th>Item</th><th>Key</th><th class="right">Amount</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <h2 style="margin-top:16px">Roster</h2>
+    <div class="row">
+      <div><label>Add hero</label><select id="unitPick"></select></div>
+      <div><label>Level</label><input id="unitLvl" type="number" value="1"></div>
+      <div style="flex:0 0 auto"><button class="ghost" id="unitAdd">Add</button></div>
+      <div class="muted" style="flex:1 1 100%" id="unitCount"></div>
+    </div>
+  </div>
+</section>
+
+<!-- --------------------------------------------------------------- gacha -->
+<section id="gacha">
+  <div class="card">
+    <h2>Pull rates</h2>
+    <p class="help">Relative weights per rarity, per banner. They do not have to
+      add up to anything — 845/130/25 and 84.5/13/2.5 behave identically. Leave a
+      banner untouched to use the client's own <code>unitGachaID</code> rates.
+      Banner&nbsp;2 is the one that supplies the hero pools; banner&nbsp;1 (the
+      Time Cube) has no pools of its own and falls back to it.</p>
+    <div id="rateRows"></div>
+    <div class="row"><button class="act" id="saveRates">Save rates</button>
+      <button class="ghost" id="resetRates">Use the game's rates</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Duplicate heroes</h2>
+    <p class="help">What you get when you summon a hero you already own. Rows are
+      <code>[type1, type2, type3, amount]</code>. Put <code>"unit"</code> in the
+      type2 slot to mean <em>the hero that was actually summoned</em>.<br>
+      Defaults: <strong>A</strong> and <strong>S</strong> give a generic Memory
+      Stone from the client's <code>DecompPieceReturn</code> table;
+      <strong>SS</strong> and <strong>SSS</strong> give 40 of that hero's own
+      Memory — <code>[16, "unit", -1, 40]</code> — which is exactly what one
+      star-up costs in <code>GradeUpMaterial</code>.</p>
+    <div class="grid2" id="dupeRows"></div>
+    <div class="row" style="margin-top:10px">
+      <div style="flex:0 0 auto">
+        <label><input type="checkbox" id="dupeAsUnits" style="width:auto"> Give a second copy of the hero instead</label>
+      </div>
+    </div>
+    <div class="row"><button class="act" id="saveDupe">Save</button>
+      <button class="ghost" id="resetDupe">Use the game's table</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Summon cost</h2>
+    <p class="help">Per banner. Blank uses <code>GachaList</code>.</p>
+    <div id="costRows"></div>
+    <div class="row"><button class="act" id="saveCost">Save costs</button>
+      <button class="ghost" id="resetCost">Use the game's costs</button></div>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------- rewards -->
+<section id="rewards">
+  <div class="card">
+    <h2>Stage drops</h2>
+    <p class="help">Multiplies every stage reward. 1.0 is what the game shipped with.</p>
+    <div class="row">
+      <div><label>All clears</label><input id="rwMult" type="number" step="0.1"></div>
+      <div><label>First clear, on top</label><input id="rwFirst" type="number" step="0.1"></div>
+      <div><label>Rank EXP per clear (−1 = the stage's stamina cost)</label>
+        <input id="rwRank" type="number"></div>
+    </div>
+    <div class="row"><button class="act" id="saveRewards">Save</button></div>
+  </div>
+  <div class="card">
+    <h2>Per-stage overrides</h2>
+    <p class="help">Replace a stage's drops outright. JSON object keyed by dungeon
+      id, each an array of <code>[type1, type2, type3, amount]</code>. Example:
+      <code>{"1": [[4,-1,-1,1000]]}</code></p>
+    <textarea id="stageOver"></textarea>
+    <div class="row" style="margin-top:10px"><button class="act" id="saveStage">Save</button></div>
+  </div>
+</section>
+
+<!-- -------------------------------------------------------- new accounts -->
+<section id="newacct">
+  <div class="card">
+    <h2>What a new player starts with</h2>
+    <p class="help">Applies to accounts created from now on; it does not touch
+      existing saves. Keys are <code>type1</code> or <code>type1:type2</code>.
+      Set a value to 0 to remove something the server would otherwise grant.</p>
+    <div class="row">
+      <div><label>Starting rank EXP (−1 = the built-in rank-30 default)</label>
+        <input id="naExp" type="number"></div>
+      <div style="flex:0 0 auto">
+        <label><input type="checkbox" id="naHeroes" style="width:auto"> Grant the full 138-hero roster</label>
+      </div>
+    </div>
+    <label>Starting resource overrides (JSON)</label>
+    <textarea id="naRes"></textarea>
+    <div class="row" style="margin-top:10px"><button class="act" id="saveNew">Save</button></div>
+  </div>
+  <div class="card">
+    <h2>Equipment</h2>
+    <div class="row">
+      <div style="flex:0 0 auto">
+        <label><input type="checkbox" id="eqConsume" style="width:auto"> Equipping consumes the item from the wallet</label>
+      </div>
+      <div style="flex:0 0 auto"><button class="act" id="saveEq">Save</button></div>
+    </div>
+    <p class="help">Gear stacks and lives in the wallet, so without this one sword
+      could be worn by the whole roster.</p>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------- devices -->
+<section id="devices">
+  <div class="card">
+    <h2>Device links</h2>
+    <p class="help">Every guest device gets its own account the first time it
+      connects, so several people can share one server without sharing a save.
+      Re-point a device here to move someone onto a different save — that is the
+      other half of import/export.</p>
+    <div class="tablewrap">
+      <table id="devTable">
+        <thead><tr><th>Device ID</th><th>Account</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <div><label>Device ID</label><input id="devId" placeholder="uuid from the client"></div>
+      <div><label>Account ID</label><input id="devAcct" type="number"></div>
+      <div style="flex:0 0 auto"><button class="ghost" id="devLink">Link</button></div>
+    </div>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------------ raw -->
+<section id="raw">
+  <div class="card">
+    <h2>Everything, as JSON</h2>
+    <p class="help">Only what differs from the defaults is stored. Editing here is
+      the same as editing <code>server/settings.json</code>, except it takes
+      effect immediately.</p>
+    <textarea id="rawJson" style="min-height:340px"></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="act" id="saveRaw">Save</button>
+      <button class="ghost danger" id="resetAll">Reset everything to defaults</button>
+    </div>
+    <details style="margin-top:12px">
+      <summary>Show the full effective settings (defaults + your changes)</summary>
+      <pre class="mono" id="effJson" style="overflow-x:auto"></pre>
+    </details>
+  </div>
+</section>
+
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+
+let SET = {}, REF = {units:{}, banners:[]}, ACCT = null, NAMES = {};
+
+function toast(msg, bad) {
+  const t = $('#toast');
+  t.textContent = msg; t.className = 'show' + (bad ? ' err' : '');
+  clearTimeout(t._t); t._t = setTimeout(() => t.className = '', 2600);
+}
+async function api(path, opts) {
+  const url = '/api' + path + (TOKEN ? (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN) : '');
+  const r = await fetch(url, opts);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || ('HTTP ' + r.status));
+  return body;
+}
+const post = (path, obj) => api(path, {
+  method: 'POST', headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify(obj)
+});
+async function saveSettings(tree, note) {
+  const r = await post('/settings', {settings: tree});
+  SET = r.effective; SET._overrides = r.overrides;
+  renderRaw(); toast(note || 'Saved');
+}
+async function resetSetting(path, note) {
+  const r = await post('/settings', {reset: path});
+  SET = r.effective; SET._overrides = r.overrides;
+  renderGacha(); renderRaw(); toast(note);
+}
+function num(el, dflt) { const v = parseFloat($(el).value); return isNaN(v) ? dflt : v; }
+function parseJson(el, what) {
+  const raw = $(el).value.trim();
+  if (!raw) return {};
+  try { return JSON.parse(raw); }
+  catch (e) { throw new Error(what + ': ' + e.message); }
+}
+
+/* --------------------------------------------------------------- tabs --- */
+$$('nav button').forEach(b => b.onclick = () => {
+  $$('nav button').forEach(x => x.classList.toggle('on', x === b));
+  $$('main section').forEach(s => s.classList.toggle('on', s.id === b.dataset.tab));
+});
+
+/* ----------------------------------------------------------- accounts --- */
+const resName = key => NAMES[key] || key;
+async function loadAccounts() {
+  const {accounts} = await api('/accounts');
+  const tb = $('#acctTable tbody');
+  tb.innerHTML = '';
+  for (const a of accounts) {
+    const tr = document.createElement('tr');
+    tr.className = 'pick';
+    tr.innerHTML = `<td class="mono">${a.account_id}</td><td>${a.nickname ?? ''}</td>
+      <td>${a.units}</td><td>${a.resources}</td>
+      <td class="mono">${a.devices.length}</td>
+      <td class="muted">${(a.last_login || '').replace('T', ' ')}</td>
+      <td><button class="ghost">Edit</button></td>`;
+    tr.onclick = () => openAccount(a.account_id);
+    tb.appendChild(tr);
+  }
+  if (!accounts.length) tb.innerHTML = '<tr><td colspan="7" class="muted">No accounts yet — start the game once.</td></tr>';
+}
+async function openAccount(id) {
+  const res = await api('/accounts/' + id);
+  ACCT = res.account; NAMES = res.names || {};
+  $('#editor').hidden = false;
+  $('#edId').textContent = id;
+  $('#edNick').value = ACCT.nickname || '';
+  $('#edExp').value = ACCT.exp || 0;
+  renderResources(); renderRoster();
+  $('#editor').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+function renderResources() {
+  const filter = $('#resFilter').value.trim().toLowerCase();
+  const tb = $('#resTable tbody');
+  tb.innerHTML = '';
+  const rows = Object.entries(ACCT.resources || {}).sort(
+    (a, b) => parseInt(a[0]) - parseInt(b[0]) || a[0].localeCompare(b[0]));
+  for (const [k, v] of rows) {
+    const name = resName(k);
+    if (filter && !k.includes(filter) && !name.toLowerCase().includes(filter)) continue;
+    const tr = document.createElement('tr');
+    const inp = `<input type="number" value="${v}" data-key="${k}" style="max-width:150px">`;
+    tr.innerHTML = `<td>${name}</td><td class="mono muted">${k}</td><td class="right">${inp}</td>`;
+    tr.querySelector('input').onchange = e => {
+      ACCT.resources[k] = parseInt(e.target.value || '0', 10);
+      pushAccount({resources: {[k]: ACCT.resources[k]}});
+    };
+    tb.appendChild(tr);
+  }
+  if (!tb.children.length) tb.innerHTML = '<tr><td colspan="3" class="muted">Nothing matches.</td></tr>';
+}
+function renderRoster() {
+  const sel = $('#unitPick');
+  if (!sel.options.length) {
+    const ids = Object.keys(REF.units).sort((a, b) => a - b);
+    sel.innerHTML = ids.map(i => `<option value="${i}">${REF.units[i]} (${i})</option>`).join('');
+  }
+  $('#unitCount').textContent = (ACCT.units || []).length + ' heroes on this account';
+}
+async function pushAccount(patch) {
+  const r = await post('/accounts/' + ACCT.account_id, patch);
+  ACCT = r.account; NAMES = r.names || NAMES; toast('Saved');
+}
+
+/* Resource picker: the catalogue is 4,650 rows, so it is searched server-side
+   rather than shipped to the browser. */
+let searchTimer = null;
+$('#resSearch').oninput = e => {
+  clearTimeout(searchTimer);
+  const q = e.target.value.trim();
+  const sel = $('#resPick');
+  if (q.length < 2) { sel.hidden = true; return; }
+  searchTimer = setTimeout(async () => {
+    try {
+      const {resources} = await api('/resources?limit=100&q=' + encodeURIComponent(q));
+      sel.innerHTML = resources.map(r =>
+        `<option value="${r.key}">${r.name}  —  ${r.key}</option>`).join('');
+      sel.hidden = !resources.length;
+      if (!resources.length) toast('Nothing matches “' + q + '”', true);
+    } catch (err) { toast(err.message, true); }
+  }, 220);
+};
+$('#resPick').onchange = e => {
+  $('#resKey').value = e.target.value;
+  const cur = ACCT && ACCT.resources[e.target.value];
+  $('#resVal').value = cur == null ? '' : cur;
+  $('#resVal').focus();
+};
+$('#reloadAccts').onclick = () => loadAccounts().then(() => toast('Reloaded'));
+$('#resFilter').oninput = () => ACCT && renderResources();
+$('#resAdd').onclick = async () => {
+  const key = $('#resKey').value.trim();
+  if (!key || !ACCT) return;
+  await pushAccount({resources: {[key]: parseInt($('#resVal').value || '0', 10)}});
+  renderResources();
+};
+$('#saveProfile').onclick = () => pushAccount({
+  nickname: $('#edNick').value, exp: parseInt($('#edExp').value || '0', 10)});
+$('#unitAdd').onclick = async () => {
+  await pushAccount({add_units: [{id: parseInt($('#unitPick').value, 10),
+                                  level: parseInt($('#unitLvl').value || '1', 10)}]});
+  renderRoster();
+};
+$('#exportBtn').onclick = () => {
+  const q = TOKEN ? '?token=' + encodeURIComponent(TOKEN) : '';
+  location.href = '/api/accounts/' + ACCT.account_id + '/export' + q;
+};
+$('#deleteBtn').onclick = async () => {
+  if (!confirm('Delete account ' + ACCT.account_id + '? This cannot be undone.\n\n'
+               + 'Export it first if you might want it back.')) return;
+  await api('/accounts/' + ACCT.account_id, {method: 'DELETE'});
+  $('#editor').hidden = true; ACCT = null;
+  await loadAccounts(); await loadDevices(); toast('Deleted');
+};
+$('#importBtn').onclick = () => $('#importFile').click();
+$('#importFile').onchange = async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const save = JSON.parse(await file.text());
+    const target = prompt('Import into which account id?\n\n'
+      + 'Leave blank to keep the id in the file, or type a new one.',
+      save.account?.account_id ?? save.account_id ?? '');
+    if (target === null) return;
+    const device = prompt('Also link a device id to it? (optional)\n\n'
+      + 'This is what moves a save onto a new phone.', '') || '';
+    const body = {save, overwrite: true};
+    if (target !== '') body.account_id = parseInt(target, 10);
+    if (device) body.device_id = device.trim();
+    const res = await post('/accounts/import', body);
+    await loadAccounts(); await loadDevices();
+    toast('Imported into account ' + res.account_id);
+    openAccount(res.account_id);
+  } catch (err) { toast(err.message, true); }
+  finally { e.target.value = ''; }
+};
+
+/* -------------------------------------------------------------- gacha --- */
+const RARITY = {0: 'A', 1: 'S', 2: 'SS', 3: 'SSS'};
+function renderGacha() {
+  const rates = SET.gacha.rates || {};
+  $('#rateRows').innerHTML = [1, 2].map(b => `
+    <div class="row"><div style="flex:0 0 90px"><label>Banner</label>
+      <input value="${b}" disabled></div>
+      ${[0, 1, 2, 3].map(r => `<div><label>${RARITY[r]} weight</label>
+        <input type="number" data-rate="${b}.${r}" value="${(rates[b] || {})[r] ?? ''}"
+               placeholder="game default"></div>`).join('')}
+    </div>`).join('');
+
+  const dupe = SET.gacha.duplicate || {};
+  $('#dupeRows').innerHTML = [0, 1, 2, 3].map(r => `
+    <div><label>Duplicate ${RARITY[r]} gives</label>
+      <input data-dupe="${r}" value="${dupe[r] ? JSON.stringify(dupe[r]) : ''}"
+             placeholder="${r >= 2 ? '[[16,\"unit\",-1,40]]' : 'game default'}"
+             class="mono"></div>`).join('');
+  $('#dupeAsUnits').checked = !!SET.gacha.duplicates_as_units;
+
+  const cost = SET.gacha.cost || {};
+  $('#costRows').innerHTML = [1, 2].map(b => {
+    const c = cost[b] || {};
+    return `<div class="row"><div style="flex:0 0 90px"><label>Banner</label>
+      <input value="${b}" disabled></div>
+      <div><label>Resource type1</label><input type="number" data-cost="${b}.type1" value="${c.type1 ?? ''}" placeholder="33"></div>
+      <div><label>type2</label><input type="number" data-cost="${b}.type2" value="${c.type2 ?? ''}" placeholder="-1"></div>
+      <div><label>1× cost</label><input type="number" data-cost="${b}.single" value="${c.single ?? ''}" placeholder="5"></div>
+      <div><label>10× cost</label><input type="number" data-cost="${b}.ten" value="${c.ten ?? ''}" placeholder="45"></div>
+    </div>`;
+  }).join('');
+}
+$('#saveRates').onclick = () => {
+  const rates = {};
+  $$('[data-rate]').forEach(i => {
+    if (i.value.trim() === '') return;
+    const [b, r] = i.dataset.rate.split('.');
+    (rates[b] = rates[b] || {})[r] = parseInt(i.value, 10);
+  });
+  saveSettings({gacha: {rates}}, 'Pull rates saved').then(renderGacha);
+};
+$('#resetRates').onclick = async () => {
+  await resetSetting('gacha.rates', 'Back to the game’s rates');
+};
+$('#saveDupe').onclick = () => {
+  const duplicate = {};
+  try {
+    $$('[data-dupe]').forEach(i => {
+      if (i.value.trim() === '') return;
+      const v = JSON.parse(i.value);
+      if (!Array.isArray(v)) throw new Error('rarity ' + i.dataset.dupe + ' must be an array of rows');
+      duplicate[i.dataset.dupe] = v;
+    });
+  } catch (e) { return toast(e.message, true); }
+  saveSettings({gacha: {duplicate, duplicates_as_units: $('#dupeAsUnits').checked}},
+               'Duplicate rewards saved').then(renderGacha);
+};
+$('#resetDupe').onclick = async () => {
+  await resetSetting('gacha.duplicate', 'Back to DecompPieceReturn');
+};
+$('#saveCost').onclick = () => {
+  const cost = {};
+  $$('[data-cost]').forEach(i => {
+    if (i.value.trim() === '') return;
+    const [b, f] = i.dataset.cost.split('.');
+    (cost[b] = cost[b] || {})[f] = parseInt(i.value, 10);
+  });
+  saveSettings({gacha: {cost}}, 'Costs saved').then(renderGacha);
+};
+$('#resetCost').onclick = async () => {
+  await resetSetting('gacha.cost', 'Back to GachaList');
+};
+
+/* ------------------------------------------------------------ rewards --- */
+function renderRewards() {
+  $('#rwMult').value = SET.rewards.multiplier;
+  $('#rwFirst').value = SET.rewards.first_clear_multiplier;
+  $('#rwRank').value = SET.rewards.rank_exp_per_clear;
+  $('#stageOver').value = JSON.stringify(SET.rewards.stage_overrides || {}, null, 1);
+}
+$('#saveRewards').onclick = () => saveSettings({rewards: {
+  multiplier: num('#rwMult', 1), first_clear_multiplier: num('#rwFirst', 1),
+  rank_exp_per_clear: num('#rwRank', -1)}}, 'Reward settings saved');
+$('#saveStage').onclick = () => {
+  let v; try { v = parseJson('#stageOver', 'Stage overrides'); }
+  catch (e) { return toast(e.message, true); }
+  saveSettings({rewards: {stage_overrides: v}}, 'Stage overrides saved');
+};
+
+/* ------------------------------------------------------- new accounts --- */
+function renderNew() {
+  $('#naExp').value = SET.account.starting_exp;
+  $('#naHeroes').checked = !!SET.account.grant_all_heroes;
+  $('#naRes').value = JSON.stringify(SET.account.starting_resources || {}, null, 1);
+  $('#eqConsume').checked = !!SET.equipment.consume_on_equip;
+}
+$('#saveNew').onclick = () => {
+  let v; try { v = parseJson('#naRes', 'Starting resources'); }
+  catch (e) { return toast(e.message, true); }
+  saveSettings({account: {starting_exp: num('#naExp', -1),
+    grant_all_heroes: $('#naHeroes').checked, starting_resources: v}},
+    'New-account settings saved');
+};
+$('#saveEq').onclick = () => saveSettings(
+  {equipment: {consume_on_equip: $('#eqConsume').checked}}, 'Saved');
+
+/* ------------------------------------------------------------ devices --- */
+async function loadDevices() {
+  const {devices} = await api('/devices');
+  const tb = $('#devTable tbody');
+  tb.innerHTML = '';
+  for (const [dev, acct] of Object.entries(devices)) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="mono">${dev}</td><td class="mono">${acct}</td>
+      <td><button class="ghost danger">Unlink</button></td>`;
+    tr.querySelector('button').onclick = async () => {
+      if (!confirm('Unlink ' + dev + '?\n\nThat device will get a brand new account '
+                   + 'next time it connects. The save itself is kept.')) return;
+      await post('/devices', {device_id: dev, account_id: null});
+      loadDevices(); toast('Unlinked');
+    };
+    tb.appendChild(tr);
+  }
+  if (!tb.children.length) tb.innerHTML = '<tr><td colspan="3" class="muted">No devices have connected yet.</td></tr>';
+}
+$('#devLink').onclick = async () => {
+  const d = $('#devId').value.trim(), a = $('#devAcct').value.trim();
+  if (!d || !a) return toast('Both fields are needed', true);
+  await post('/devices', {device_id: d, account_id: parseInt(a, 10)});
+  $('#devId').value = $('#devAcct').value = '';
+  loadDevices(); toast('Linked');
+};
+
+/* ---------------------------------------------------------------- raw --- */
+function renderRaw() {
+  $('#rawJson').value = JSON.stringify(SET._overrides || {}, null, 2);
+  $('#effJson').textContent = JSON.stringify(SET, null, 2);
+}
+$('#saveRaw').onclick = async () => {
+  let v; try { v = parseJson('#rawJson', 'Settings'); }
+  catch (e) { return toast(e.message, true); }
+  await post('/settings', {reset: true});
+  const r = await post('/settings', {settings: v});
+  SET = r.effective; SET._overrides = r.overrides;
+  renderAll(); toast('Settings saved');
+};
+$('#resetAll').onclick = async () => {
+  if (!confirm('Reset every setting to its default?\n\nSaves and device links are not touched.')) return;
+  const r = await post('/settings', {reset: true});
+  SET = r.effective; SET._overrides = r.overrides;
+  renderAll(); toast('Back to defaults');
+};
+
+/* --------------------------------------------------------------- boot --- */
+function renderAll() { renderGacha(); renderRewards(); renderNew(); renderRaw(); }
+(async function () {
+  try {
+    const st = await api('/status');
+    $('#status').textContent = `client ${st.version} · ${st.public_host}:${st.game_port} · `
+      + `${st.accounts} account${st.accounts === 1 ? '' : 's'} · ${st.devices} device${st.devices === 1 ? '' : 's'}`;
+    REF = await api('/reference');
+    const s = await api('/settings');
+    SET = s.effective; SET._overrides = s.overrides;
+    renderAll();
+    await loadAccounts();
+    await loadDevices();
+  } catch (e) {
+    toast('Could not reach the server: ' + e.message, true);
+  }
+})();
+</script>
+</body>
+</html>

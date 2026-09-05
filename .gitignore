@@ -45,3 +45,6 @@ dist/
 *-heroicchant.apk
 *.apk.unaligned
 build-apk/
+
+# Server owner settings, written by the dashboard.
+/settings.json

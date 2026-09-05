@@ -149,5 +149,58 @@ class Tables(object):
         val = list(rows[0].keys())[1]
         return {to_int(r[key]): r[val] for r in rows}
 
+    # -- naming a wallet row ------------------------------------------------
+    # A save's wallet is keyed by (Type1, Type2, Type3) and nothing else, which
+    # makes it unreadable: "16:41" is Bam's Memory and "5:1403" is a specific
+    # sword.  `ResourceTable` is the client's own answer -- 4,650 rows of
+    # (ResourceID, Type2, Type3) -> NameID -- and covers all but a handful.
+    # itemList and runeList fill the rest in, and unnamed keys fall back to
+    # something honest rather than a lie.
+    def resource_names(self):
+        """(t1, t2, t3) -> display name, built once and cached."""
+        if getattr(self, '_res_names', None) is not None:
+            return self._res_names
+        strings = self.strings()
+        out = {}
+        for r in self.json('ResourceTable'):
+            name = strings.get(to_int(r.get('NameID'), -1))
+            if name:
+                out[(to_int(r.get('ResourceID'), -9), to_int(r.get('Type2'), -1),
+                     to_int(r.get('Type3'), -1))] = name
+        # Items and runes are keyed by their own id in Type2 and mostly appear
+        # in ResourceTable already; these catch the ones that do not.
+        for row in self.sql('itemList'):
+            key = (5, to_int(row.get('itemID'), -1), -1)
+            if key not in out:
+                name = strings.get(to_int(row.get('nameID'), -1))
+                if name:
+                    out[key] = name
+        for row in self.sql('runeList'):
+            key = (6, to_int(row.get('runeID'), -1), -1)
+            if key not in out:
+                name = strings.get(to_int(row.get('nameID'), -1))
+                if name:
+                    out[key] = name
+        self._res_names = out
+        return out
+
+    def resource_name(self, t1, t2=-1, t3=-1):
+        """The best name for one wallet key.  Never returns None."""
+        t1, t2, t3 = int(t1), int(t2), int(t3)
+        names = self.resource_names()
+        for key in ((t1, t2, t3), (t1, t2, -1), (t1, -1, -1)):
+            if key in names:
+                # A (t1, -1, -1) hit for a keyed resource is the family name,
+                # not this row's -- say which member it is.
+                if key == (t1, -1, -1) and t2 >= 0:
+                    return '%s %d' % (names[key], t2)
+                return names[key]
+        if t1 == 1:                                  # ResourceType.Unit
+            row = self.unit(t2) or {}
+            name = self.strings().get(to_int(row.get('NameID'), -1))
+            if name:
+                return name
+        return 'type %d' % t1 if t2 < 0 else 'type %d / %d' % (t1, t2)
+
 
 TABLES = Tables()
