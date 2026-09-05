@@ -16,8 +16,9 @@
 #   * the downloads come off a local HTTP server, with the real spec.json,
 #     the real herocantare.db and a cut-down ngelgames.zip -- enough that the
 #     boot server is happy and the self-test genuinely runs
-#   * the script is fed in through a pipe, because `curl | bash` is how it is
-#     actually invoked and that changes what stdin is
+#   * it is run the way the docs tell players to run it -- downloaded to a
+#     file, then executed -- and scenario 1 additionally proves the older
+#     `curl | bash` form still works, since that changes what stdin is
 #
 # Scenarios, in order:
 #   1. clean install
@@ -225,9 +226,18 @@ run_setup() {
              HC_FILES_MIN="$FILES_MIN" HC_DB_MIN="$DB_MIN" \
              HC_DATA_MIN="$DATA_MIN" HC_APK_MIN=1
       mkdir -p "$HOME"
-      # Through a pipe on purpose: `curl | bash` makes stdin the script itself,
-      # and a `read` in the script will happily eat the next line of it.
-      cat "$ORIGIN/tools/termux-setup.sh" | bash ) > "$SANDBOX/run.log" 2>&1
+      if [ "${PIPE_IT:-0}" = 1 ]; then
+          # `curl | bash` makes stdin the script itself, and anything in the
+          # script that reads stdin will eat it. Still supported, still tested.
+          cat "$ORIGIN/tools/termux-setup.sh" | bash
+      else
+          # What the docs actually tell players to run: download to a file,
+          # then run the file. curl -fsSL is the point -- plain -sL says
+          # nothing at all when it cannot reach GitHub, which looks exactly
+          # like the script being broken.
+          cp "$ORIGIN/tools/termux-setup.sh" "$HOME/hc-setup.sh"
+          bash "$HOME/hc-setup.sh"
+      fi ) > "$SANDBOX/run.log" 2>&1
     echo $?
 }
 
@@ -252,6 +262,12 @@ check "self-test passed"               "grep -q 'self-test passed' '$SANDBOX/run
 check "warned about the unpatched APK" "grep -q 'dead official CDN' '$SANDBOX/run.log'"
 check "did not open the installer"     "! grep -q '^termux-open' '$CALLS'"
 check "asked for storage access"       "grep -q '^termux-setup-storage' '$CALLS'"
+
+# The docs moved to download-then-run, but plenty of people will still pipe it,
+# and the brace wrap is what makes that safe. Prove both invocations work.
+RC="$(PIPE_IT=1 run_setup)"
+check "still works when piped into bash" "[ '$RC' = 0 ]"
+check "  ...and reaches the end"         "grep -q 'Done\.' '$SANDBOX/run.log'"
 
 # ================================================================ scenario 2 =
 say "2. re-run, nothing new upstream"

@@ -2,7 +2,7 @@
 #
 # Heroic Chant, all on the phone. Install and update, in one command.
 #
-#   pkg install -y curl && curl -sL https://raw.githubusercontent.com/i-Ac1D-i/heroic-chant/main/tools/termux-setup.sh | bash
+#   pkg install -y curl && curl -fsSL https://raw.githubusercontent.com/i-Ac1D-i/heroic-chant/main/tools/termux-setup.sh -o ~/hc-setup.sh && bash ~/hc-setup.sh
 #
 # Safe to re-run. On a second run it checks the remote repo for new commits and
 # pulls them, and skips any download it already has. That is the intended way

@@ -124,7 +124,7 @@ longer works.
 Then open it and paste one command:
 
 ```bash
-pkg install -y curl && curl -sL https://raw.githubusercontent.com/i-Ac1D-i/heroic-chant/main/tools/termux-setup.sh | bash
+pkg install -y curl && curl -fsSL https://raw.githubusercontent.com/i-Ac1D-i/heroic-chant/main/tools/termux-setup.sh -o ~/hc-setup.sh && bash ~/hc-setup.sh
 ```
 
 That's the whole install. It fetches the server, the ~2 GB of client files, the
@@ -158,7 +158,7 @@ server over loopback — nothing leaves the phone, and it only happens once.
 Re-run the same command:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/i-Ac1D-i/heroic-chant/main/tools/termux-setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/i-Ac1D-i/heroic-chant/main/tools/termux-setup.sh -o ~/hc-setup.sh && bash ~/hc-setup.sh
 ```
 
 It checks the repo for new commits, lists what changed, and fast-forwards. It
@@ -187,6 +187,7 @@ random disconnects that look like server bugs.
 
 | What you see | What's wrong |
 |---|---|
+| The command does nothing at all — no output, straight back to the prompt | `curl` could not reach GitHub and said nothing about it. That is what `-s` does on a network error, which is why the command above uses `-fsSL` and writes to a file instead of piping. Check your connection, and try `curl -v https://raw.githubusercontent.com` to see the real error |
 | "App not installed" | The retail version is still installed. Uninstall it first — different signing key |
 | Game hangs on the loading bar | The server isn't running, or Termux got killed. Check `~/heroic-chant/logs/boot.log` |
 | `boot.log` empty, game stuck | The APK wasn't patched. A retail APK still points at the dead CDN — check you installed the `-heroicchant` one |
