@@ -20,6 +20,12 @@
 #
 set -eu
 
+# Everything below lives inside these braces so that bash has to parse the
+# whole file before it runs a single line of it. Piped through `curl | bash`,
+# an unbraced script starts executing as it arrives -- so a connection that
+# drops halfway leaves you with half an install and no error.
+{
+
 REPO="${HC_REPO:-https://github.com/i-Ac1D-i/heroic-chant.git}"
 BRANCH="${HC_BRANCH:-main}"
 BASE="$HOME/heroic-chant"
@@ -33,6 +39,14 @@ PKG_NAME="com.ngelgames.herocantare"
 # spec.json + the JSON tables, from tools/make_mobile_bundle.py --no-db.
 # The phone cannot build these itself, so they have to be hosted.
 : "${HC_DATA_ID:=1Mo2t-jzwaQeq3U2bkFKgmQQghBbLmgdN}"
+
+# Smallest size each download can plausibly be. A truncated file still starts
+# with a zip header, so magic bytes alone don't catch a download that died --
+# these do. Lower them if you're mirroring a cut-down build.
+: "${HC_FILES_MIN:=1500000000}"
+: "${HC_DB_MIN:=40000000}"
+: "${HC_DATA_MIN:=1000000}"
+: "${HC_APK_MIN:=130000000}"
 
 C_OK=$'\033[1;32m'; C_INFO=$'\033[1;36m'; C_WARN=$'\033[1;33m'
 C_ERR=$'\033[1;31m'; C_OFF=$'\033[0m'
@@ -99,24 +113,40 @@ fi
 # Google Drive refuses a plain GET for anything big, answering with an
 # interstitial HTML page instead. The usercontent host with confirm=t skips it.
 # -C - resumes, which matters a lot for a 2 GB file on a phone.
+# Downloads land on `<dest>.part` and are renamed only once curl says it is
+# done. That is the whole cross-run resume story: a phone that goes to sleep
+# 900 MB into a 2 GB file leaves a .part, and the next run picks it up. Writing
+# straight to <dest> instead means the next run sees a non-empty file, calls it
+# finished, and hands a truncated zip to the boot server.
 fetch() {
-    local url="$1" dest="$2" name="$3"
-    say "Downloading $name"
-    if ! curl -L --fail --retry 3 --retry-delay 5 --retry-connrefused \
-              -C - -o "$dest" "$url"; then
-        # A completed file makes curl exit 33 ("range not supported"); retry whole.
-        rm -f "$dest"
-        curl -L --fail --retry 3 --retry-delay 5 -o "$dest" "$url" \
+    local url="$1" dest="$2" name="$3" part="$2.part" rc=0
+    if [ -s "$part" ]; then
+        say "Downloading $name -- resuming at $(human "$part")"
+    else
+        say "Downloading $name"
+    fi
+    curl -L --fail --retry 3 --retry-delay 5 --retry-connrefused \
+         -C - -o "$part" "$url" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        # 33 is "server won't do ranges", which is also what a *complete*
+        # .part gets (the server answers 416). Either way the safe move is to
+        # start over -- resuming onto a file we can't range-check would leave
+        # a plausible-looking truncation.
+        rm -f "$part"
+        curl -L --fail --retry 3 --retry-delay 5 -o "$part" "$url" \
             || die "download failed: $name"
     fi
+    mv -f "$part" "$dest"
 }
 
 gdrive_url() { printf 'https://drive.usercontent.google.com/download?id=%s&export=download&confirm=t' "$1"; }
 
 # Reject Drive's HTML interstitial / quota page, which otherwise lands on disk
-# with a .zip name and fails much later with a confusing unzip error.
+# with a .zip name and fails much later with a confusing unzip error. The size
+# floor is the other half of that: a zip header survives truncation, so magic
+# bytes alone will happily wave through half a file.
 verify() {
-    local f="$1" kind="$2" name="$3"
+    local f="$1" kind="$2" name="$3" floor="${4:-1}"
     [ -s "$f" ] || { rm -f "$f"; die "$name came back empty"; }
     if head -c 512 "$f" | grep -qiE '<!doctype html|<html|Google Drive - Quota'; then
         rm -f "$f"
@@ -126,6 +156,11 @@ verify() {
         zip) head -c 2 "$f" | grep -q 'PK' || { rm -f "$f"; die "$name is not a zip"; } ;;
         db)  head -c 15 "$f" | grep -q 'SQLite format 3' || { rm -f "$f"; die "$name is not a SQLite database"; } ;;
     esac
+    local n; n="$(wc -c < "$f" | tr -d ' ')"
+    if [ "$n" -lt "$floor" ]; then
+        rm -f "$f"
+        die "$name is only $n bytes, expected at least $floor -- looks truncated. Re-run to fetch it again."
+    fi
     ok "$name ($(human "$f"))"
 }
 
@@ -139,32 +174,46 @@ adopt() {
     cp "$hit" "$dest"
 }
 
-need() { [ ! -s "$1" ]; }
+# "Already downloaded" means big enough as well as present -- see verify().
+have() {
+    [ -s "$1" ] || return 1
+    [ "$(wc -c < "$1" | tr -d ' ')" -ge "$2" ]
+}
+
+# The three downloads plus the game's own ~860 MB asset pull have to fit. Say
+# so now rather than 40 minutes into a 2 GB transfer.
+free_mb() { df -Pm "$1" 2>/dev/null | awk 'NR==2 {print $4}'; }
+FREE="$(free_mb "$BASE" || true)"
+if [ -n "${FREE:-}" ] && [ "$FREE" -lt 3200 ]; then
+    warn "only ${FREE} MB free. The install needs about 2.1 GB here, plus"
+    warn "another ~860 MB for the assets the game downloads into its own"
+    warn "folder. Free some space or this will die partway."
+fi
 
 # 1. Client files (~2 GB) -- served back to the game as its CDN.
 FILES_ZIP="$BASE/ngelgames.zip"
-if need "$FILES_ZIP"; then
+if have "$FILES_ZIP" "$HC_FILES_MIN"; then
+    ok "client files already here ($(human "$FILES_ZIP"))"
+else
     adopt 'files*.zip' "$FILES_ZIP" || adopt 'ngelgames*.zip' "$FILES_ZIP" || \
         fetch "${HC_FILES_URL:-$(gdrive_url "$HC_FILES_ID")}" "$FILES_ZIP" "client files (~2 GB, this is the long one)"
-    verify "$FILES_ZIP" zip "client files"
-else
-    ok "client files already here ($(human "$FILES_ZIP"))"
+    verify "$FILES_ZIP" zip "client files" "$HC_FILES_MIN"
 fi
 
 # 2. herocantare.db -- the 172 SQLite tables.
 DB="$BASE/herocantare.db"
-if need "$DB"; then
+if have "$DB" "$HC_DB_MIN"; then
+    ok "herocantare.db already here ($(human "$DB"))"
+else
     adopt 'herocantare*.db' "$DB" || \
         fetch "${HC_DB_URL:-$(gdrive_url "$HC_DB_ID")}" "$DB" "herocantare.db (47 MB)"
-    verify "$DB" db "herocantare.db"
-else
-    ok "herocantare.db already here ($(human "$DB"))"
+    verify "$DB" db "herocantare.db" "$HC_DB_MIN"
 fi
 
 # 3. spec.json + data/ -- generated on a desktop, cannot be built here.
 if [ ! -s "$SERVER/hc/protocol/spec.json" ] || [ ! -d "$SERVER/data" ]; then
     DATA_ZIP="$BASE/heroic-chant-data.zip"
-    if need "$DATA_ZIP"; then
+    if ! have "$DATA_ZIP" "$HC_DATA_MIN"; then
         adopt 'heroic-chant-data*.zip' "$DATA_ZIP" || {
             case "$HC_DATA_ID" in
                 REPLACE_*) die "The packet spec and data tables aren't hosted yet.
@@ -175,7 +224,7 @@ if [ ! -s "$SERVER/hc/protocol/spec.json" ] || [ ! -d "$SERVER/data" ]; then
             esac
             fetch "${HC_DATA_URL:-$(gdrive_url "$HC_DATA_ID")}" "$DATA_ZIP" "packet spec + data tables (~2 MB)"
         }
-        verify "$DATA_ZIP" zip "data bundle"
+        verify "$DATA_ZIP" zip "data bundle" "$HC_DATA_MIN"
     fi
     say "Unpacking the data tables"
     TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
@@ -197,15 +246,40 @@ installed() {
     return 1
 }
 
+# The install is a tap on Android's own dialog, so the script has to stop and
+# wait for it. It cannot use a plain `read`: the advertised way to run this is
+# `curl -sL ... | bash`, which makes stdin the script itself, and `read` would
+# swallow the next line of the file instead of waiting for a keypress. Ask the
+# terminal directly; if there isn't one, watch for the package instead.
+wait_for_install() {
+    say "Waiting for the install to finish (up to 5 minutes)"
+    local i=0
+    while [ "$i" -lt 60 ]; do
+        if installed; then return 0; fi
+        sleep 5
+        i=$((i + 1))
+    done
+    return 1
+}
+
+pause_for_install() {
+    if [ "${HC_NONINTERACTIVE:-0}" != 1 ] && [ -r /dev/tty ] && [ -c /dev/tty ]; then
+        printf '\n  Press Enter once the install has finished... ' > /dev/tty
+        read -r _ < /dev/tty || true
+    else
+        wait_for_install || true
+    fi
+}
+
 if installed; then
     ok "Hero Cantare is installed"
 else
     say "Hero Cantare isn't installed"
     APK="${DL:-$BASE}/hero-cantare.apk"
-    if need "$APK"; then
+    if ! have "$APK" "$HC_APK_MIN"; then
         adopt '*herocantare*.apk' "$APK" || adopt '*heroicchant*.apk' "$APK" || \
             fetch "${HC_APK_URL:-$(gdrive_url "$HC_APK_ID")}" "$APK" "the game (138 MB)"
-        verify "$APK" zip "APK"
+        verify "$APK" zip "APK" "$HC_APK_MIN"
     fi
 
     # An unpatched APK still points at dlhc.ngelgames.net, which is dead and
@@ -218,8 +292,14 @@ else
             || am start -a android.intent.action.VIEW -t application/vnd.android.package-archive \
                  -d "file://$APK" >/dev/null 2>&1 \
             || warn "couldn't open the installer; install $APK yourself from a file manager"
-        echo
-        read -r -p "  Press Enter once the install has finished... " _ || true
+        pause_for_install
+        if installed; then
+            ok "Hero Cantare is installed"
+        else
+            warn "still can't see Hero Cantare. If you skipped the install, run"
+            warn "    termux-open $APK"
+            warn "or open it from a file manager, then re-run this."
+        fi
     else
         warn "That APK still points at the dead official CDN, so it will not work"
         warn "with a local server -- it would just hang on the loading screen."
@@ -244,15 +324,25 @@ export HC_DB_PATH="$BASE/herocantare.db"
 export HC_CLIENT_FILES="$BASE/ngelgames.zip"
 
 mkdir -p "$BASE/logs"
-cleanup() { kill 0 2>/dev/null || true; }
+
+# Stop exactly the two children, by pid. `kill 0` would take out the whole
+# process group -- which is the same thing when you run this yourself from a
+# Termux prompt, and a much bigger thing when something else launches it.
+PIDS=""
+cleanup() { [ -n "$PIDS" ] && kill $PIDS 2>/dev/null; return 0; }
 trap cleanup EXIT INT TERM
 
 termux-wake-lock 2>/dev/null || true
 
+# Both bind loopback only. The game is on this same phone, so there is no
+# reason for the save server to be reachable from the rest of the wifi --
+# it has no authentication and takes every packet on trust.
 python tools/bootserver.py --host 127.0.0.1 --http-port 8080 --no-dns \
     --bind 127.0.0.1 > "$BASE/logs/boot.log" 2>&1 &
-python -m hc.main --public-host 127.0.0.1 --port 21010 \
+PIDS="$!"
+python -m hc.main --host 127.0.0.1 --public-host 127.0.0.1 --port 21010 \
     > "$BASE/logs/game.log" 2>&1 &
+PIDS="$PIDS $!"
 
 sleep 3
 for f in boot game; do
@@ -264,6 +354,7 @@ echo
 echo "Heroic Chant is running."
 echo "  boot shim  : 127.0.0.1:8080   ($BASE/logs/boot.log)"
 echo "  game server: 127.0.0.1:21010  ($BASE/logs/game.log)"
+echo "  dashboard  : http://127.0.0.1:8099  <- open this in your browser"
 echo
 echo "Leave this running and switch to the Hero Cantare app."
 echo "On first launch it asks to download ~860 MB -- tap OK. That's the game"
@@ -290,9 +381,12 @@ cat <<EOF
 
   Start it:   ~/heroic-chant/start.sh
   Update it:  re-run this same command any time
+  Configure:  http://127.0.0.1:8099 in your browser, while it is running
 
   Then switch to Hero Cantare and play. Keep Termux running in the background;
   if Android kills it the game loses its server. start.sh takes a wake-lock,
   but also set Termux to Unrestricted under Settings > Apps > Termux > Battery.
 
 EOF
+
+}
