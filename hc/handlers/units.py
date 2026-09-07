@@ -170,3 +170,25 @@ async def unit_awaken(s, a):
 
 
 # 30007 UnitEquipInfoChangeReq now lives in handlers/equipment.py
+
+
+@handler(30094)
+async def change_party(s, a):
+    """Save one party line-up.
+
+    This is the generic one, used by every screen that has a team: the arena
+    attack party arrives here as _PartyType 6, guild wars as its own type, and
+    so on.  Parties all share `player.d['party']`, told apart by
+    NGPartyInfo.SlotType, because that is how the client wants them back --
+    NGLoginAckLargeData.vecPartyInfo is a single list with mixed SlotTypes.
+
+    Without this the arena screen let you pick an attack team, threw the
+    selection away, and then would not start a fight.
+    """
+    p = s.player
+    rows = [{'slot_index': u.SlotIndex, 'unit_uid': u.UnitUID,
+             'skill_on_off': u.SkillOnOff} for u in a['_vecPartyInfo']]
+    p.set_party(a['_PartyType'], rows)
+    p.save()
+    log.info('party type %d set to %d unit(s)', a['_PartyType'], len(rows))
+    await s.send(40105, Err.OK, a['_vecPartyInfo'])

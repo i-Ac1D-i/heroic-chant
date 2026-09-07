@@ -72,6 +72,30 @@ DEFAULTS = {
         # out of the gate.  0 starts at rank 1.
         'starting_exp': -1,            # -1 = keep the built-in default
     },
+    'arena': {
+        # Bump this to wipe the ladder and start a new season.
+        'season': 1,
+        'starting_points': 0,
+        # 0 = unlimited fights per day.
+        'daily_battles': 0,
+        # Hand-built bot teams, newest first in the dashboard. Each is
+        #   {"name": ..., "points": 1200, "exp": 5000, "profile": 1,
+        #    "units": [{"id": 41, "level": 60, "tier": 5, "grade": 3,
+        #               "rareness": 2}, ...]}
+        # These are offered alongside (or instead of) the shipped ones.
+        'bots': [],
+        # The client shipped 887 AI teams in ArenaAIList/ArenaAITeamInfo, so a
+        # one-player server has a full ladder without configuring anything.
+        # Turn this off to run a ladder of only your own teams.
+        'use_shipped_bots': True,
+        # Bots appear on the leaderboard too -- a board of one is not a board.
+        'bots_on_leaderboard': True,
+        # -1 keeps ArenaTierInfo.AiMatchRate, which is how often matchmaking
+        # should offer a bot rather than a real player at your tier. Force it
+        # to 0 to only ever match people, 1 to only ever match bots.
+        'ai_match_rate': -1,
+        'leaderboard_size': 100,
+    },
     'equipment': {
         # Equipping moves a copy out of the wallet, so one sword cannot be worn
         # by the whole roster.  false makes gear free.

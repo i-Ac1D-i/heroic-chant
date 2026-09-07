@@ -556,3 +556,117 @@ SSS duplicate paid out *nothing*.
 The dashboard override (`gacha.duplicate`) accepts the string `"unit"` in the
 Type2 slot, meaning "the hero that was actually summoned" -- the only way a
 fixed table can express a hero-specific reward.
+
+## Seventh pass: the Arena
+
+Asynchronous PvP, and the first mode that involves other people at all.
+
+### Why classic Arena and not the other three
+
+The protocol has four: Arena, Tag Arena, World Arena and Global Arena. The
+last three are real-time and route through the match server or the global match
+proxy, so they need two players connected at the same instant -- on a
+self-hosted server that is usually nobody. Classic Arena is asynchronous: you
+attack a *snapshot* of somebody's defence team and they never have to be
+online. That is the one that works for a single player, so that is the one
+implemented.
+
+### The client already had 887 opponents
+
+`ArenaAIList` (887 rows: name, rating, EXP, profile) and `ArenaAITeamInfo`
+(3,460 rows: the actual line-ups, with level, tier, grade, rarity and gear per
+slot) shipped inside `herocantare.db`. 865 of them have a usable team. So a
+one-player server gets a full ladder without configuring anything, and the
+dashboard's team builder is for *adding* to that rather than a prerequisite.
+
+Everything else is table-driven too:
+
+* `ArenaTierInfo` -- 32 tiers, each with its point threshold, how far
+  matchmaking may reach (`MatchRange`), how often it should offer a bot rather
+  than a person (`AiMatchRate`), a separate win/lose point swing for every kind
+  of opponent (`Ai*`, `Upper*`, `Lower*`), and the per-tier rewards
+* `ArenaMatchGroup` -- point band to match group
+* `ArenaSeasonReward` -- payout by tier
+
+Losses are stored as positive numbers in the table and subtracted.
+
+### Real players and bots share one pool
+
+`arena.rivals()` scans the saves for any account with units and reads its
+defence team; `arena.bots()` returns the shipped teams plus anything built in
+the dashboard. `roll_matches` mixes them using the tier's own `AiMatchRate`,
+so with one account it is bots all the way down without a special case, and
+with several it starts offering people. The save scan is cached for 20 seconds
+because it is disk work on a packet path -- but only who is *offered* is
+cached; a fight always re-reads the defender's save.
+
+A defence team falls back to the story party, then to the strongest four
+heroes. An account that never opens the arena screen is still a valid
+opponent, which matters when there are only two people on a server.
+
+Bot account ids are negative, so nothing can confuse one for a real account.
+
+### Worth knowing
+
+* Unlike stages, arena **does** report a loss -- `PlayAreanRewardReq.iWinLose`
+  carries it -- so both outcomes are handled. There is still no defeat packet
+  anywhere else in the protocol.
+* `NGArenaInfo` has three nested structs (`ngCommandCenterInfo`,
+  `ngCommandersInfo`, `frameInfo`). They are built empty rather than left null,
+  for the usual reason: a null nested struct throws inside the client's own
+  marshaller, where the failure is invisible from here.
+* `tools/test_arena.py` covers both shapes -- a one-player ladder, and two
+  accounts finding and fighting each other -- with a fake session that really
+  encodes and decodes every reply, so a malformed DTO fails in the test rather
+  than on the phone.
+
+### Slots are positions, and only four of them exist
+
+The single most expensive thing to get wrong. `EUnitPosition` @dump.cs:633232:
+
+```
+None = -1   ECommander = 0
+EFront_1 = 1   EFront_2 = 2
+EBack_1 = 10   EBack_2 = 11   EBack_3 = 12   EBack_4 = 13   EBack_5 = 14
+```
+
+**There is no position 3 or 4.** An arena team is four heroes at 1, 2, 10 and
+11 -- all 865 usable rows of `ArenaAITeamInfo` use exactly that set, and so
+does a real client's own `ChangeArenaDefensePartyReq`.
+
+Getting it wrong fails twice over, and neither failure says anything useful:
+
+* a hero at slot 3 is simply **missing from the opponent preview**, and
+* the battle scene then throws `NullReferenceException` inside
+  `PlayBaseScene.UnitLoading` (via `PlayUnitLoading` -> `PlayInfoLoading` ->
+  `RM_PlayGameInfoLoading` -> `PvPScene.Start`), which on screen is a **black
+  screen** -- the game is still running and still takes touches, it just never
+  draws. The only trace is in the device's own log:
+  `adb logcat -d | grep Unity`.
+
+The matching `SlotType` is `ContentsType.ArenaDefense` = 5 (attack is 6). Send
+`SlotType` 0 and the client finds no defence party at all, fields nobody, and
+the attacker wins the instant the fight starts.
+
+### Hand-built bot teams are validated, not trusted
+
+The dashboard is the one place a person types numbers that go straight into
+that scene, so `arena.check_bot()` repairs a team before it is stored *and*
+again when it is read back -- an older `settings.json`, or one edited by hand,
+must not be able to black-screen anyone. Every rule is one all 3,460 rows of
+`ArenaAITeamInfo` already obey:
+
+| Field | Rule | Where it comes from |
+|---|---|---|
+| slot | assigned 1, 2, 10, 11 by position; never taken from input | `EUnitPosition` |
+| hero | must be `IsPlayerHero` -- 138 of UnitList's 768 rows | every shipped team obeys this |
+| team | at most 4, no repeats | 0 of 865 shipped teams repeat a hero |
+| level | 1..`TierUpTable.MaxLv` for its tier (30 at T1, 110 at T10) | 0 of 3,460 members exceed it |
+| tier | 1..10 | `TierUpTable` |
+| grade | 0..6 | `unitGradeStatInfo` carries no other grade |
+| rarity | at least the hero's own `Rareness`, at most 3 | no member is ever below its unit's |
+
+Note that the per-unit `MaxGrade` and `NormalTierMax` in `UnitList` are *not*
+hard limits -- 1,220 shipped members exceed both, and 1,476 use heroes with no
+`unitGradeStatInfo` rows at all. The client tolerates all of that, so the
+validator does too. Only the slot is fatal.

@@ -266,6 +266,7 @@ change anything that is meant to be changed:
 | Accounts | Edit a save: nickname, rank EXP, every currency and item **by name** — search "Bam's Memory" rather than guessing at `16:41:-1` — and the roster. **Export** writes a `heroic-chant-<id>.json` you can move to another phone; **Import** reads one back, optionally binding it to a device id in the same step |
 | Summoning | Pull rates per rarity per banner, what a duplicate hero converts to (SS and above give that hero's own Memory), and the cost of a summon |
 | Rewards | Stage drop multipliers, and per-stage overrides |
+| Arena | Season and rating settings, and the bot teams the ladder is filled with — the client already ships 887, so this is for adding your own |
 | New accounts | What a brand new player starts with, and whether they get the full roster |
 | Devices | Which device id owns which save |
 

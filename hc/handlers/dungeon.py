@@ -38,9 +38,10 @@ async def dungeon_start(s, a):
         return
 
     # Remember the party so the client's next load keeps the same line-up.
-    p.d['party'] = [{'slot_type': u.SlotType, 'slot_index': u.SlotIndex,
-                     'unit_uid': u.UnitUID, 'skill_on_off': u.SkillOnOff}
-                    for u in a['vecPartyInfo']]
+    p.set_party(a['vecPartyInfo'][0].SlotType if a['vecPartyInfo'] else 0,
+                [{'slot_type': u.SlotType, 'slot_index': u.SlotIndex,
+                  'unit_uid': u.UnitUID, 'skill_on_off': u.SkillOnOff}
+                 for u in a['vecPartyInfo']])
     p.d['last_dungeon'] = did
     p.save()
     log.info('stage %d start (cost %s x%d)', did, cost_type, cost_val)

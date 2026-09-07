@@ -231,6 +231,8 @@ the dashboard's Raw settings tab for free.
 `python tools/test_dashboard.py` if you touched settings or the dashboard --
 it drives the real HTTP API against a throwaway accounts directory and checks
 that a setting changed through the API actually changes what the game does.
+`python tools/test_arena.py` if you touched the arena -- it drives the
+real handlers for a one-player ladder and for two players fighting each other.
 `bash tools/test-termux-setup.sh` if you touched the installer. It's not a unit test suite, it's an
 end-to-end run against a real socket, which for this project catches more.
 
@@ -252,8 +254,9 @@ doing first.
 
 Bigger things that need actual design:
 
-- **PvP / arena** — needs a second player or an AI stand-in. `ArenaAIList` and
-  `ArenaAITeamInfo` exist in the data, so the game shipped with bot teams.
+- **Tag / World / Global Arena** — the other three arena modes. All real-time
+  and routed through the match server, so unlike classic Arena they need two
+  people connected at the same instant.
 - **Guild raids and wars** — currently stubbed to empty replies.
 - **The Store screen** only shows its Costume tab. The listings are all served
   correctly, so the tab list is coming from somewhere else. Unsolved.

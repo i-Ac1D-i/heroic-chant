@@ -69,6 +69,7 @@ running:
 * stage drop multipliers and per-stage overrides
 * what a brand new account starts with
 * which device id owns which save
+* Arena: season, rating and matchmaking settings, plus your own bot teams
 
 Changes apply on the next packet; nothing restarts. Only what you change is
 written, to `server/settings.json`. Delete that file to go back to stock.

@@ -16,6 +16,7 @@ save that is open in a live session: the player object is held in memory by
 that session, so edits to a logged-in account are written to disk and picked up
 when the client next reconnects.
 """
+import copy
 import json
 import logging
 import os
@@ -127,6 +128,35 @@ def _catalogue(query='', limit=200):
             break
     out.sort(key=lambda r: r['name'])
     return out
+
+
+def _clean_arena_bots(bots):
+    """Run incoming bot teams through the arena's own validator.
+
+    The dashboard is the only place a person types numbers that end up being
+    fed straight to the battle scene, and the scene has no error handling: a
+    hero in a slot that is not an `EUnitPosition` throws inside
+    `PlayBaseScene.UnitLoading` and the player gets a black screen with
+    nothing in any log they can see.  So what is stored is the repaired
+    version, and the caller is told what was changed.
+    """
+    from ..game import arena
+    if not isinstance(bots, list):
+        return [], ['expected a list of teams']
+    clean, warnings = [], []
+    for i, bot in enumerate(bots):
+        if not isinstance(bot, dict):
+            warnings.append('team %d was not an object and was dropped' % (i + 1))
+            continue
+        fixed, problems = arena.check_bot(bot, i)
+        warnings += ['%s: %s' % (fixed['name'], p) for p in problems]
+        if not fixed['units']:
+            continue
+        # Store only what the settings file owns; index/custom are derived.
+        clean.append({k: fixed[k] for k in
+                      ('name', 'points', 'exp', 'profile',
+                       'commander', 'commander_level', 'units')})
+    return clean, warnings
 
 
 def _unit_names():
@@ -244,17 +274,93 @@ class Handler(BaseHTTPRequestHandler):
                                         'effective': SETTINGS.all})
             if method == 'POST':
                 body = self._body()
+                warnings = []
                 if body.get('reset') is True:
                     SETTINGS.reset()
                 elif 'reset' in body:
                     SETTINGS.reset(body['reset'])
                 elif 'path' in body:
-                    SETTINGS.set(body['path'], body.get('value'))
+                    value = body.get('value')
+                    if body['path'] == 'arena.bots':
+                        value, warnings = _clean_arena_bots(value)
+                    SETTINGS.set(body['path'], value)
                 else:
-                    SETTINGS.update(body.get('settings') or {})
+                    incoming = body.get('settings') or {}
+                    if isinstance(incoming.get('arena'), dict) \
+                            and 'bots' in incoming['arena']:
+                        incoming = copy.deepcopy(incoming)
+                        incoming['arena']['bots'], warnings = \
+                            _clean_arena_bots(incoming['arena']['bots'])
+                    SETTINGS.update(incoming)
                 log.info('settings updated via dashboard')
+                if warnings:
+                    log.info('arena bots corrected: %s', '; '.join(warnings))
                 return self._send(200, {'effective': SETTINGS.all,
-                                        'overrides': SETTINGS.overrides})
+                                        'overrides': SETTINGS.overrides,
+                                        'warnings': warnings})
+
+        # ---- arena ----
+        # The bot teams themselves live in settings (so they are edited and
+        # reset like everything else); this endpoint is the read side, which
+        # needs the game tables to turn ids into names and a team into a rating.
+        if path == '/arena' and method == 'GET':
+            from ..game import arena
+            units = _unit_names()
+            shipped = arena._shipped_bots()
+            custom = arena._custom_bots()
+
+            def as_row(bot):
+                return {
+                    'index': bot['index'], 'name': bot['name'],
+                    'points': bot['points'], 'tier': arena.tier_name(bot['points']),
+                    'power': arena.bot_power(bot), 'custom': bot['custom'],
+                    'units': [{'id': u['id'], 'name': units.get(u['id'], str(u['id'])),
+                               'level': u['level'], 'tier': u['tier'],
+                               'grade': u['grade'], 'rareness': u['rareness']}
+                              for u in bot['units']],
+                }
+
+            ladder = []
+            for account_id in _account_ids():
+                pl = Player.load(account_id)
+                if pl is None:
+                    continue
+                rec = (pl.d.get('arena') or {})
+                ladder.append({
+                    'account_id': account_id, 'nickname': pl.d.get('nickname'),
+                    'points': int(rec.get('points', 0)),
+                    'tier': arena.tier_name(int(rec.get('points', 0))),
+                    'wins': int(rec.get('wins', 0)),
+                    'losses': int(rec.get('losses', 0)),
+                    'defense': len(rec.get('defense') or []),
+                    'power': arena.power(pl),
+                })
+            ladder.sort(key=lambda r: -r['points'])
+            return self._send(200, {
+                'players': ladder,
+                'custom_bots': [as_row(b) for b in custom],
+                'shipped_bots': len(shipped),
+                'shipped_sample': [as_row(b) for b in shipped[:25]],
+                # What the team builder is allowed to produce.  Sent rather
+                # than hardcoded in the page so the rules have one home.
+                'limits': {
+                    'max_team': arena.MAX_TEAM,
+                    'slots': list(arena.DEFAULT_SLOTS),
+                    'grade_max': arena.GRADE_MAX,
+                    'rareness_max': arena.RARENESS_MAX,
+                    'name_max': arena.NAME_MAX,
+                    'tier_caps': {str(t): lv for t, lv
+                                  in sorted(arena.tier_level_caps().items())
+                                  if t >= 1},
+                    'heroes': {str(uid): {'name': name, 'rareness': rare}
+                               for uid, (name, rare)
+                               in sorted(arena.playable_heroes().items())},
+                },
+                'tiers': [{'tier': to_int(t.get('Tier'), 0),
+                           'name': arena.tier_name(to_int(t.get('PointMin'), 0)),
+                           'from': to_int(t.get('PointMin'), 0)}
+                          for t in arena.tiers()],
+            })
 
         # ---- reference data, so the UI can show names not just numbers ----
         if path == '/reference' and method == 'GET':

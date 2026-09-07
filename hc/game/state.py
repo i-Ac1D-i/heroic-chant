@@ -89,9 +89,47 @@ def party_info(p):
         UnitUID=p.get('unit_uid', 0), SkillOnOff=p.get('skill_on_off', 0))
 
 
+# SeasonType, straight off the client's own enum @dump.cs:651196.
+SEASON_DAILY, SEASON_WEEKLY = 1, 2
+SEASON_GUILD_WARS, SEASON_GUILD_RAID = 4, 5
+SEASON_WORLD_ARENA, SEASON_ARENA, SEASON_TAG_ARENA = 6, 7, 8
+SEASON_MONTHLY = 9
+
+
+def season_values():
+    """NGCheckServerInfo.vecSeasonValue -- which seasons are running.
+
+    Not decoration.  `NMUserInfo.CheckFindNewArenaMatchUserReq` @0x13B007C
+    calls `GetNGSeasonValue(SeasonType.Arena)` and bails to its error path when
+    it comes back null, and `ArenaMatchPlayer.StartMatch` @0x1FAF560 refuses to
+    send anything unless that check is clean.  With no season the arena screen
+    opens, lists opponents, accepts a team -- and the Fight button silently
+    does nothing, because the client never talks to us at all.
+
+    Retail ran these on a real calendar.  There is no calendar here, so the
+    window is simply always open.
+    """
+    from ..settings import SETTINGS
+    from datetime import timedelta
+    now = datetime.utcnow()
+    start, end = now - timedelta(days=30), now + timedelta(days=365)
+    season = int(SETTINGS.get('arena.season', 1))
+    return [TYPES['NGSeasonValue'](iSeasonType=t, iSeasonValue=season,
+                                   tmStartDate=start, tmEndDate=end)
+            for t in (SEASON_DAILY, SEASON_WEEKLY, SEASON_MONTHLY,
+                      SEASON_ARENA, SEASON_TAG_ARENA, SEASON_WORLD_ARENA,
+                      SEASON_GUILD_WARS, SEASON_GUILD_RAID)]
+
+
 def check_info(**kw):
-    """An NGCheckServerInfo with only the named lists populated."""
+    """An NGCheckServerInfo with only the named lists populated.
+
+    vecSeasonValue is the exception: it goes in every one of these unless the
+    caller overrides it, because the client gates features on a season being
+    open and there is no single packet that establishes them.
+    """
     info = TYPES['NGCheckServerInfo']()
+    kw.setdefault('vecSeasonValue', season_values())
     for k, v in kw.items():
         setattr(info, k, v)
     return info

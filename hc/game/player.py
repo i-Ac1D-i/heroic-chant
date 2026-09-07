@@ -242,6 +242,29 @@ class Player(object):
         self.d['units'].append(u)
         return u
 
+    # -- parties -----------------------------------------------------------
+    # Every party the player has -- story, arena attack, guild war and the
+    # rest -- lives in ONE flat list, told apart by NGPartyInfo.SlotType.
+    # That is not a shortcut: it is how the client sends them back in
+    # NGLoginAckLargeData.vecPartyInfo, one list with mixed SlotTypes.
+    # Writing `d['party'] = ...` wholesale therefore silently deletes every
+    # other party, which is what stopped the arena attack team sticking.
+    def parties(self):
+        return self.d.setdefault('party', [])
+
+    def party(self, slot_type):
+        return [r for r in self.parties()
+                if int(r.get('slot_type', 0)) == int(slot_type)]
+
+    def set_party(self, slot_type, rows):
+        """Replace one party, leaving the others alone."""
+        slot_type = int(slot_type)
+        kept = [r for r in self.parties()
+                if int(r.get('slot_type', 0)) != slot_type]
+        fresh = [dict(r, slot_type=slot_type) for r in rows]
+        self.d['party'] = kept + fresh
+        return fresh
+
     def find_unit(self, uid):
         return next((u for u in self.d['units'] if u['uid'] == int(uid)), None)
 

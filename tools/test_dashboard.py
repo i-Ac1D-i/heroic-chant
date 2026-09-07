@@ -209,6 +209,33 @@ def main():
         call(base, '/settings', 'POST', {'reset': 'gacha.duplicate'})
         SETTINGS.load()
 
+        # A dashboard bot goes straight into the battle scene, which has no
+        # error handling, so the API must repair what it is given rather than
+        # store it as typed.
+        print('\narena bot validation over the API')
+        code, body = call(base, '/settings', 'POST', {
+            'path': 'arena.bots',
+            'value': [{'name': 'Bad', 'points': 1000, 'units': [
+                {'id': 1, 'level': 60, 'tier': 5, 'grade': 3},
+                {'id': 16, 'level': 62, 'tier': 5, 'grade': 5},
+                {'id': 87, 'level': 1, 'tier': 5, 'grade': 5},
+                {'id': 2, 'level': 999, 'tier': 5, 'grade': 7}]}]})
+        stored = body['effective']['arena']['bots']
+        check('the API stores the repaired team, not what was sent',
+              [u['slot'] for u in stored[0]['units']] == [1, 2, 10, 11],
+              stored[0]['units'])
+        check('the API says what it changed',
+              any('grade' in w for w in body['warnings'])
+              and any('level' in w for w in body['warnings']), body.get('warnings'))
+        code, body = call(base, '/arena')
+        lim = body.get('limits') or {}
+        check('the builder is told the rules',
+              lim.get('max_team') == 4 and lim.get('slots') == [1, 2, 10, 11]
+              and lim.get('tier_caps', {}).get('5') == 80
+              and len(lim.get('heroes') or {}) == 138, lim.get('slots'))
+        call(base, '/settings', 'POST', {'reset': 'arena.bots'})
+        SETTINGS.load()
+
         print('\ndevice links')
         code, body = call(base, '/devices')
         check('both devices are listed',

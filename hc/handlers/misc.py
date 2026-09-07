@@ -90,3 +90,18 @@ async def latest_hottime(s, a):
 @handler(30075)
 async def alien_dungeon_total_info(s, a):
     await s.send(40081, [], [])
+
+
+@handler(30357)
+async def unit_favorites_change(s, a):
+    """The heart on a hero card.  Cosmetic, but it rides NGUnitInfo.Favorite,
+    so without it the flag is lost on the next login."""
+    p = s.player
+    unit = p.find_unit(a['_uid'])
+    if unit is None:
+        await s.send(40380, Err.NOT_FOUND, state.resource_sync(p))
+        return
+    unit['favorite'] = bool(a['_Favorites'])
+    p.save()
+    await s.send(40380, Err.OK,
+                 state.resource_sync(p, vecChangeUnitInfo=[state.unit_info(unit)]))

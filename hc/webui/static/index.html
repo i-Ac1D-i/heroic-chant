@@ -80,6 +80,7 @@
     <button data-tab="accounts" class="on">Accounts</button>
     <button data-tab="gacha">Summoning</button>
     <button data-tab="rewards">Rewards</button>
+    <button data-tab="arena">Arena</button>
     <button data-tab="newacct">New accounts</button>
     <button data-tab="devices">Devices</button>
     <button data-tab="raw">Raw settings</button>
@@ -222,6 +223,83 @@
   </div>
 </section>
 
+<!-- --------------------------------------------------------------- arena -->
+<section id="arena">
+  <div class="card">
+    <h2>How the ladder is filled</h2>
+    <p class="help">Arena is asynchronous — you fight a snapshot of somebody's
+      defence team, so they never have to be online. The client shipped with
+      <strong id="shippedCount">…</strong> ready-made AI teams, which means a
+      one-player server already has a full ladder. Anyone else who connects to
+      this server joins it automatically and can be found and fought.</p>
+    <div class="row">
+      <div><label>Season (bump to wipe the ladder)</label><input id="arSeason" type="number"></div>
+      <div><label>Starting rating</label><input id="arStart" type="number"></div>
+      <div><label>Battles per day (0 = unlimited)</label><input id="arDaily" type="number"></div>
+      <div><label>Bot match rate (−1 = the game's own per-tier rate)</label>
+        <input id="arRate" type="number" step="0.05"></div>
+    </div>
+    <div class="row">
+      <div style="flex:0 0 auto"><label><input type="checkbox" id="arShipped" style="width:auto"> Use the 887 shipped AI teams</label></div>
+      <div style="flex:0 0 auto"><label><input type="checkbox" id="arBoard" style="width:auto"> Show bots on the leaderboard</label></div>
+      <div style="flex:0 0 auto"><button class="act" id="arSave">Save</button></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Your bot teams</h2>
+    <p class="help">Teams you build here are offered alongside the shipped ones —
+      or instead of them, if you turn those off above. A team needs a name, a
+      rating (which decides who it gets matched against) and at least one hero.</p>
+    <div class="tablewrap">
+      <table id="botTable">
+        <thead><tr><th>Name</th><th>Rating</th><th>Tier</th><th>Power</th>
+          <th>Team</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <h2 style="margin-top:18px">Add a team</h2>
+    <div class="row">
+      <div><label>Name</label><input id="botName" placeholder="e.g. Tower Guard"></div>
+      <div><label>Rating</label><input id="botPoints" type="number" value="1000"></div>
+      <div><label>Profile icon</label><input id="botProfile" type="number" value="1"></div>
+    </div>
+    <div class="row">
+      <div style="flex:2 1 240px"><label>Add a hero</label><select id="botHero"></select></div>
+      <div><label>Tier</label><select id="botTier"></select></div>
+      <div><label>Level</label><input id="botLvl" type="number" value="60" min="1"></div>
+      <div><label>Stars</label><input id="botGrade" type="number" value="3" min="0" max="6"></div>
+      <div><label>Rarity</label><select id="botRare"></select></div>
+      <div style="flex:0 0 auto"><button class="ghost" id="botAddUnit">Add hero</button></div>
+    </div>
+    <div class="row"><div style="flex:1 1 100%" id="botHint" class="muted"></div></div>
+    <div class="row"><div style="flex:1 1 100%" id="botDraft" class="muted">No heroes added yet.</div></div>
+    <div class="row">
+      <button class="act" id="botSave">Create team</button>
+      <button class="ghost" id="botClear">Clear</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>The ladder</h2>
+    <p class="help">Real accounts only. Bots are ranked alongside them in game.</p>
+    <div class="tablewrap">
+      <table id="ladderTable">
+        <thead><tr><th>Rank</th><th>Player</th><th>Rating</th><th>Tier</th>
+          <th>W</th><th>L</th><th>Power</th><th>Defence set</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <details style="margin-top:12px">
+      <summary>A sample of the shipped AI teams</summary>
+      <div class="tablewrap"><table id="shippedTable">
+        <thead><tr><th>Name</th><th>Rating</th><th>Power</th><th>Team</th></tr></thead>
+        <tbody></tbody></table></div>
+    </details>
+  </div>
+</section>
+
 <!-- -------------------------------------------------------- new accounts -->
 <section id="newacct">
   <div class="card">
@@ -323,7 +401,15 @@ const post = (path, obj) => api(path, {
 async function saveSettings(tree, note) {
   const r = await post('/settings', {settings: tree});
   SET = r.effective; SET._overrides = r.overrides;
-  renderRaw(); toast(note || 'Saved');
+  renderRaw();
+  // The server repairs anything it cannot let through to the game and says
+  // what it changed; showing that is better than saving silently.
+  if (r.warnings && r.warnings.length) {
+    toast(r.warnings.join(' • '), true);
+  } else {
+    toast(note || 'Saved');
+  }
+  return r;
 }
 async function resetSetting(path, note) {
   const r = await post('/settings', {reset: path});
@@ -585,6 +671,174 @@ $('#saveNew').onclick = () => {
 $('#saveEq').onclick = () => saveSettings(
   {equipment: {consume_on_equip: $('#eqConsume').checked}}, 'Saved');
 
+/* -------------------------------------------------------------- arena --- */
+let ARENA = {players: [], custom_bots: [], shipped_bots: 0, shipped_sample: []};
+let DRAFT = [];
+// Filled from /arena. What a bot team is allowed to contain, derived on the
+// server from the game's own tables so the rules live in one place.
+let LIMITS = {max_team: 4, grade_max: 6, rareness_max: 3, tier_caps: {}, heroes: null};
+
+function teamSummary(units) {
+  if (!units.length) return '<span class="muted">empty</span>';
+  return units.map(u => `${u.name} <span class="muted">L${u.level}</span>`).join(', ');
+}
+async function loadArena() {
+  ARENA = await api('/arena');
+  $('#shippedCount').textContent = ARENA.shipped_bots;
+
+  const bt = $('#botTable tbody');
+  bt.innerHTML = '';
+  ARENA.custom_bots.forEach((b, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${b.name}</td><td class="mono">${b.points}</td>
+      <td class="muted">${b.tier}</td><td class="mono">${b.power}</td>
+      <td>${teamSummary(b.units)}</td>
+      <td><button class="ghost danger">Delete</button></td>`;
+    tr.querySelector('button').onclick = async () => {
+      if (!confirm(`Delete "${b.name}"?`)) return;
+      const bots = (SET.arena.bots || []).slice();
+      bots.splice(i, 1);
+      await saveSettings({arena: {bots}}, 'Team deleted');
+      await post('/settings', {path: 'arena.bots', value: bots});
+      loadArena();
+    };
+    bt.appendChild(tr);
+  });
+  if (!ARENA.custom_bots.length) {
+    bt.innerHTML = '<tr><td colspan="6" class="muted">None yet — the shipped AI teams are being used.</td></tr>';
+  }
+
+  const lt = $('#ladderTable tbody');
+  lt.innerHTML = ARENA.players.map((p, i) => `<tr>
+      <td class="mono">${i + 1}</td><td>${p.nickname ?? p.account_id}</td>
+      <td class="mono">${p.points}</td><td class="muted">${p.tier}</td>
+      <td>${p.wins}</td><td>${p.losses}</td><td class="mono">${p.power}</td>
+      <td>${p.defense ? p.defense + ' heroes' : '<span class="muted">not set</span>'}</td>
+    </tr>`).join('') ||
+    '<tr><td colspan="8" class="muted">No accounts yet.</td></tr>';
+
+  $('#shippedTable tbody').innerHTML = ARENA.shipped_sample.map(b =>
+    `<tr><td>${b.name}</td><td class="mono">${b.points}</td>
+     <td class="mono">${b.power}</td><td>${teamSummary(b.units)}</td></tr>`).join('');
+
+  // The builder offers only what the client can actually put on the field:
+  // the 138 playable heroes, not all 768 UnitList rows (the rest are bosses
+  // and scenery with no playable prefab), and the tier/level/star/rarity
+  // ranges the server derived from the game's own tables.
+  LIMITS = ARENA.limits || LIMITS;
+  if (!$('#botHero').options.length && LIMITS.heroes) {
+    const ids = Object.keys(LIMITS.heroes).sort((a, b) => a - b);
+    $('#botHero').innerHTML = ids.map(i =>
+      `<option value="${i}">${LIMITS.heroes[i].name} (${i})</option>`).join('');
+    $('#botTier').innerHTML = Object.keys(LIMITS.tier_caps)
+      .sort((a, b) => a - b)
+      .map(t => `<option value="${t}"${t === '5' ? ' selected' : ''}>Tier ${t} — to level ${LIMITS.tier_caps[t]}</option>`)
+      .join('');
+    $('#botGrade').max = LIMITS.grade_max;
+    $('#botHero').onchange = syncHeroLimits;
+    $('#botTier').onchange = syncHeroLimits;
+    syncHeroLimits();
+  }
+}
+
+// Keeps the inputs honest as the hero or tier changes: the level ceiling comes
+// from the tier (tier 1 stops at 30, tier 10 at 110) and rarity can be raised
+// above what a hero is born as but never lowered below it.
+function syncHeroLimits() {
+  if (!LIMITS.heroes) return;
+  const hero = LIMITS.heroes[$('#botHero').value];
+  const cap = LIMITS.tier_caps[$('#botTier').value] || 110;
+  const lvl = $('#botLvl');
+  lvl.max = cap;
+  if (parseInt(lvl.value || '1', 10) > cap) lvl.value = cap;
+  const base = hero ? hero.rareness : 0;
+  const want = parseInt($('#botRare').value || base, 10);
+  let opts = '';
+  for (let r = base; r <= LIMITS.rareness_max; r++) {
+    opts += `<option value="${r}"${r === Math.max(base, want) ? ' selected' : ''}>${RARITY[r]}</option>`;
+  }
+  $('#botRare').innerHTML = opts;
+  const slot = ['Front 1', 'Front 2', 'Back 1', 'Back 2'][DRAFT.length];
+  $('#botHint').textContent = DRAFT.length >= (LIMITS.max_team || 4)
+    ? `The team is full — ${LIMITS.max_team || 4} heroes is the maximum.`
+    : `Goes in ${slot}. Level 1–${cap} at this tier; ${RARITY[base]} is `
+      + `${hero ? hero.name : 'this hero'}'s natural rarity and cannot go lower.`;
+}
+function renderArenaSettings() {
+  $('#arSeason').value = SET.arena.season;
+  $('#arStart').value = SET.arena.starting_points;
+  $('#arDaily').value = SET.arena.daily_battles;
+  $('#arRate').value = SET.arena.ai_match_rate;
+  $('#arShipped').checked = !!SET.arena.use_shipped_bots;
+  $('#arBoard').checked = !!SET.arena.bots_on_leaderboard;
+}
+$('#arSave').onclick = async () => {
+  await saveSettings({arena: {
+    season: num('#arSeason', 1), starting_points: num('#arStart', 0),
+    daily_battles: num('#arDaily', 0), ai_match_rate: num('#arRate', -1),
+    use_shipped_bots: $('#arShipped').checked,
+    bots_on_leaderboard: $('#arBoard').checked}}, 'Arena settings saved');
+  loadArena();
+};
+// Four heroes stand at EUnitPosition 1, 2, 10 and 11 — front row then back.
+// The order they are added is the order they are placed.
+const SLOT_NAMES = ['Front 1', 'Front 2', 'Back 1', 'Back 2'];
+
+function renderDraft() {
+  $('#botDraft').innerHTML = DRAFT.length
+    ? DRAFT.map((u, i) =>
+        `<span class="pill" style="margin-right:6px">
+         <span class="muted">${SLOT_NAMES[i]}</span>
+         ${(LIMITS.heroes && LIMITS.heroes[u.id] || {}).name || u.id}
+         L${u.level} T${u.tier} ★${u.grade} ${RARITY[u.rareness]}
+         <a href="#" data-drop="${i}"
+         style="color:var(--bad);text-decoration:none">✕</a></span>`).join('')
+    : 'No heroes added yet.';
+  $$('#botDraft [data-drop]').forEach(a => a.onclick = e => {
+    e.preventDefault();
+    DRAFT.splice(parseInt(a.dataset.drop, 10), 1);
+    renderDraft();
+    syncHeroLimits();
+  });
+}
+$('#botAddUnit').onclick = () => {
+  const max = LIMITS.max_team || 4;
+  if (DRAFT.length >= max) return toast(`A team holds ${max} heroes`, true);
+  const id = parseInt($('#botHero').value, 10);
+  if (DRAFT.some(u => u.id === id)) {
+    return toast('That hero is already in the team', true);
+  }
+  const tier = parseInt($('#botTier').value || '5', 10);
+  const cap = LIMITS.tier_caps[tier] || 110;
+  const level = parseInt($('#botLvl').value || '1', 10);
+  if (level < 1 || level > cap) {
+    return toast(`A tier ${tier} hero can be level 1–${cap}`, true);
+  }
+  const grade = parseInt($('#botGrade').value || '0', 10);
+  if (grade < 0 || grade > LIMITS.grade_max) {
+    return toast(`Stars must be 0–${LIMITS.grade_max}`, true);
+  }
+  DRAFT.push({id, level, tier, grade,
+              rareness: parseInt($('#botRare').value || '0', 10)});
+  renderDraft();
+  syncHeroLimits();
+};
+$('#botClear').onclick = () => { DRAFT = []; renderDraft(); syncHeroLimits(); };
+$('#botSave').onclick = async () => {
+  const name = $('#botName').value.trim();
+  if (!name) return toast('Give the team a name', true);
+  if (!DRAFT.length) return toast('Add at least one hero', true);
+  const bots = (SET.arena.bots || []).slice();
+  bots.push({name, points: num('#botPoints', 1000),
+             profile: num('#botProfile', 1), exp: 1000,
+             units: DRAFT.slice()});
+  await saveSettings({arena: {bots}}, `"${name}" added`);
+  await post('/settings', {path: 'arena.bots', value: bots});
+  DRAFT = []; renderDraft();
+  $('#botName').value = '';
+  loadArena();
+};
+
 /* ------------------------------------------------------------ devices --- */
 async function loadDevices() {
   const {devices} = await api('/devices');
@@ -633,7 +887,7 @@ $('#resetAll').onclick = async () => {
 };
 
 /* --------------------------------------------------------------- boot --- */
-function renderAll() { renderGacha(); renderRewards(); renderNew(); renderRaw(); }
+function renderAll() { renderGacha(); renderRewards(); renderNew(); renderArenaSettings(); renderRaw(); }
 (async function () {
   try {
     const st = await api('/status');
@@ -645,6 +899,7 @@ function renderAll() { renderGacha(); renderRewards(); renderNew(); renderRaw();
     renderAll();
     await loadAccounts();
     await loadDevices();
+    await loadArena();
   } catch (e) {
     toast('Could not reach the server: ' + e.message, true);
   }
