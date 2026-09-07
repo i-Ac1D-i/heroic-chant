@@ -13,6 +13,49 @@ before touching a device.
 
 ---
 
+## 0b. The shortcut (Windows + emulator, or a phone on USB)
+
+Everything from section 1 down is the manual route, and worth reading once.
+Day to day, on Windows, this does the whole thing:
+
+```bash
+tools\run-emulator.bat
+```
+
+It finds the first device adb will talk to — dialling the usual emulator
+endpoints itself, because an emulator waits to be connected to rather than
+announcing itself, and its serial changes between sessions — points the
+device's loopback back at this PC with `adb reverse`, starts the boot shim,
+waits until it actually answers, then runs the game server in that window.
+Ctrl+C stops it and takes the shim with it.
+
+```bash
+tools\run-emulator.bat --debug     # DEBUG log level (packet detail)
+tools\run-emulator.bat --log       # also write logs\game.log
+tools\run-emulator.bat --wait 120  # keep looking for a device for 2 minutes
+tools\run-emulator.bat --skip-adb  # servers only, touch no device
+tools\run-emulator.bat --stop      # kill whatever a previous run left behind
+```
+
+`adb reverse` is what makes this exercise the same code path as the phone-only
+build: the device really is talking to `127.0.0.1`, exactly as it does under
+Termux. The forwards die on every emulator restart, which is the usual cause of
+"it randomly stopped working" — just re-run the script.
+
+Two details it handles that are easy to get wrong by hand:
+
+- **The host port need not be 8080.** The patched APK asks the *device* for
+  `127.0.0.1:8080`, but if something on the PC already owns 8080 (Steam's
+  `steamwebhelper.exe` is the usual culprit) the shim takes 8081 and the
+  reverse maps 8080 across to it. The shim also writes its own port into the
+  `cdninfo` it serves, so the client follows that URL next — which is why the
+  script maps that port too.
+- **It never blanket-kills python.** `--stop` looks up whoever holds each port
+  and kills it only if it really is a `python.exe`, so it cannot take out
+  something unrelated that happens to be listening.
+
+---
+
 ## 1. What you need
 
 **An ARM-capable Android.** The APK ships **arm64-v8a and armeabi-v7a only**

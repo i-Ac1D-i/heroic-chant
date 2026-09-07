@@ -17,6 +17,9 @@ def main(argv=None):
                     help='address handed to the client for the game/match servers; '
                          'set this to your LAN IP when playing on a phone')
     ap.add_argument('--log-level', default=config.LOG_LEVEL)
+    ap.add_argument('--log-file', default=None,
+                    help='also append the log to this file; the console keeps '
+                         'its copy, so a session can be watched and read back')
     ap.add_argument('--web-port', type=int, default=None,
                     help='port for the config dashboard (default: '
                          'settings.json dashboard.port, normally 8099)')
@@ -29,10 +32,16 @@ def main(argv=None):
     config.PUBLIC_HOST = args.public_host
     config.PORT = args.port
 
+    handlers = [logging.StreamHandler()]
+    if args.log_file:
+        # Explicit UTF-8: the default on Windows is the ANSI code page, and a
+        # single Korean string-table name in a log line is enough to kill the
+        # server with a UnicodeEncodeError from inside the logging call.
+        handlers.append(logging.FileHandler(args.log_file, encoding='utf-8'))
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper(), logging.INFO),
         format='%(asctime)s.%(msecs)03d %(levelname)-7s %(name)-12s %(message)s',
-        datefmt='%H:%M:%S')
+        datefmt='%H:%M:%S', handlers=handlers)
 
     log = logging.getLogger('hc')
     from . import handlers  # noqa: F401  -- registers everything
