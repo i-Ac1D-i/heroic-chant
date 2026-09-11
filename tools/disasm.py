@@ -109,6 +109,15 @@ def main(argv=None):
     ap.add_argument('--so', help='an already-extracted libil2cpp.so')
     args = ap.parse_args(argv)
 
+    # The client's string table is multilingual, so an annotation can carry
+    # Korean or accented text.  A Windows console is cp1252 by default and
+    # raises UnicodeEncodeError on the first one, which kills the whole dump
+    # part-way through -- and the interesting code is usually further down.
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, OSError):
+        pass
+
     if not args.target and not args.rva:
         ap.error('give a Class.Method or --rva')
 

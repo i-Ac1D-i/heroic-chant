@@ -18,31 +18,83 @@ log = logging.getLogger('hc.gacha')
 # ordering unambiguous in `adb logcat`.  Leave at 0 unless you are chasing that.
 ACK_DELAY = float(os.environ.get('HC_GACHA_ACK_DELAY', '0') or 0)
 
-# A summon is answered with the same Ack *shape* as a screen-open: the whole
-# wallet rather than a delta, and NGGachaDaySummonsCount.GachaID = -1.  That is
-# not cosmetic -- it is the only shape the client does not throw on.
-#
-# Every other combination tried made JoinDimensionGachaAck raise
+# A summon is answered with the same Ack *shape* as a screen-open, which is the
+# only shape the client does not throw on.  Anything fuller made
+# JoinDimensionGachaAck raise
 #     NGNetGameServer OK, Object reference not set to an instance of an object.
 # inside the client (see `adb logcat | grep Unity`), which leaves
 # DimensionGachaTabHeroUI.bSendPacket set -- GachaSummon @0x1A3C3E4 opens with
 # `if (bSendPacket) return;` -- so the summon button dies and the screen cannot
-# be dismissed.  Ruled out one at a time, none of them the cause:
-# _GachaChoiceCubeInfo, vecAddUnitInfo, vecChangeDimensionGacha, and the reward
-# contents.  What has never been varied independently, and is therefore where
-# the next session should start, is exactly the two things this shape changes:
+# be dismissed.
 #
-#   1. vecAddResourceInfo carrying the full wallet instead of only what changed
-#   2. _GachaSummonsCount.GachaID being -1 instead of the banner id
-#      (NMUserInfo.AddGachaLimitInfo @0x13A3104 is the first thing the Ack
-#      handler @0x14EBE38 does with it)
+# The older note here said the safe shape differed from the natural one in two
+# ways.  It differs in FIVE, and they were never varied independently, which is
+# why the hunt stalled.  They are the parts below.  Exactly one of them is the
+# trigger; `HC_GACHA_ACK_PARTS` turns them on one at a time so a single session
+# on the device settles it instead of a rebuild per guess.
+#
+#   wallet       vecAddResourceInfo carries only what changed, not the whole
+#                wallet
+#   collections  vecAddCollectionInfo carries the counters that changed
+#   units        vecAddUnitInfo announces a genuinely new hero
+#   dimension    vecChangeDimensionGacha carries the banner and its cube
+#   banner       NGGachaDaySummonsCount.GachaID is the banner id, not -1
+#
+# Read off the client, and worth knowing before you test (RVAs are into
+# libil2cpp.so, `python tools/disasm.py --rva ...`):
+#
+#   * JoinDimensionGachaAck is @0x14EBE38 on NGNetGameServer, whose signature
+#     is (int Error, NGCheckServerInfo, NGGachaDaySummonsCount, NGPairInt2,
+#     NGIntIntInt, NGGachaChoiceCubeInfo) -- confirmed in dump.cs, so our
+#     argument order is right.
+#   * `banner` cannot be the trigger.  AddGachaLimitInfo @0x13A3104 does
+#     nothing with GachaID but `_dic[item.GachaID] = item`, a dictionary
+#     indexer *set*.  It throws only if the item itself, or the dictionary, is
+#     null -- never because of the id's value.
+#   * `dimension` is the one to try first.  @0x14EC148 the handler walks
+#     vecAddDimensionGacha ++ vecChangeDimensionGacha (NGCheckServerInfo
+#     +0xA0 and +0xA8) and dereferences, per entry and with no skip path,
+#     NGDimensionGacha.vecSummon (+0x20) and every
+#     NGDimensionGachaSummon.ProductInfo (+0x20).  Each is a throw site.
+#     Deeper still, AddDimensionGacha @0x137CA98 ends in
+#     `_dicDimensionGacha[ngInfo.ID] = ngInfo` and throws if that static
+#     (NMUserInfo +0xC0) is null -- and it is only ever reached once the list
+#     has an entry, so an empty list cannot trip it.  That matches the
+#     symptom exactly: empty is safe, one entry is fatal.
+#   * The whole Ack, including the `_JoinDimensionGachaAck` subject's OnNext
+#     at the end (+0x238), runs inside NGNetGameServer's catch.  So the throw
+#     may be in a UI subscriber rather than the handler itself.
 #
 # Cost of the workaround: a genuinely *new* hero is not announced in
-# vecAddUnitInfo, so it only appears after a relogin.  Duplicates -- which is
-# every pull once the roster is complete -- are unaffected, because the client
-# picks the shard up by diffing the wallet.  Set HC_GACHA_RICH_ACK=1 to send
-# the fuller Ack again while chasing the real fix.
-RICH_ACK = os.environ.get('HC_GACHA_RICH_ACK', '0') in ('1', 'yes', 'true')
+# vecAddUnitInfo, so it only appears after a relogin, and the "Dimension has
+# dissipated" popup is the client noticing it never got `dimension`.  Those two
+# open items are one bug.  Duplicates -- which is every pull once the roster is
+# complete -- are unaffected, because the client picks the shard up by diffing
+# the wallet.
+ACK_PARTS = ('wallet', 'collections', 'units', 'dimension', 'banner')
+
+
+def _ack_parts():
+    """Which parts of the fuller Ack to send.  Empty is the safe shape.
+
+    HC_GACHA_ACK_PARTS=dimension      just that one
+    HC_GACHA_ACK_PARTS=units,banner   those two
+    HC_GACHA_ACK_PARTS=all            everything -- the pre-workaround Ack
+    HC_GACHA_RICH_ACK=1               kept working; same as `all`
+    """
+    raw = os.environ.get('HC_GACHA_ACK_PARTS', '').strip()
+    if not raw and os.environ.get('HC_GACHA_RICH_ACK', '0') in ('1', 'yes', 'true'):
+        raw = 'all'
+    if not raw:
+        return frozenset()
+    if raw.lower() in ('all', '*'):
+        return frozenset(ACK_PARTS)
+    want = {w.strip().lower() for w in raw.replace(';', ',').split(',') if w.strip()}
+    unknown = want - set(ACK_PARTS)
+    if unknown:
+        log.warning('ignoring unknown HC_GACHA_ACK_PARTS %s; known parts are %s',
+                    ', '.join(sorted(unknown)), ', '.join(ACK_PARTS))
+    return frozenset(want & set(ACK_PARTS))
 
 
 def _name(unit_id):
@@ -93,6 +145,41 @@ async def instant_summon(s, a):
         TYPES['NGPairInt2'](), TYPES['NGIntIntInt'](),
         gacha.summons_count(p, gid), TYPES['NGGachaSummonFreeEvent'](),
         TYPES['NGGachaChoiceCubeInfo'](), reel)
+
+
+def summon_ack_shape(p, gid, added):
+    """The NGCheckServerInfo + NGGachaDaySummonsCount for JoinDimensionGachaAck.
+
+    Split out from the handler because which fields this puts on the wire is the
+    open question, and a pure function can be exercised without a device.
+    ``gid <= 0`` is the screen opening, which is confirmed good and is left
+    exactly as it was; ``gid > 0`` is a pull, and is where the parts apply.
+    """
+    if gid <= 0:
+        return (state.resource_sync(p, vecAddUnitInfo=[state.unit_info(u)
+                                                       for u in added],
+                                    vecChangeDimensionGacha=[]),
+                gacha.summons_count(p, gid))
+
+    # A real pull.  Build the safe shape, then add back only the parts
+    # HC_GACHA_ACK_PARTS asks for, so exactly one of them can be blamed.
+    parts = _ack_parts()
+    dirty, dirty_cols = p.take_dirty(), p.take_dirty_collections()
+    extra = {}
+    if 'collections' in parts and dirty_cols:
+        extra['vecAddCollectionInfo'] = state.collection_infos(p, dirty_cols)
+    if 'units' in parts:
+        extra['vecAddUnitInfo'] = [state.unit_info(u) for u in added]
+    if 'dimension' in parts:
+        extra['vecChangeDimensionGacha'] = [gacha.dimension(p, gid)]
+    # Without 'wallet' the delta above is swallowed and the whole wallet goes.
+    only = (dirty or None) if 'wallet' in parts else None
+    sync = state.check_info(vecAddResourceInfo=state.resource_infos(p, only),
+                            **extra)
+    if parts:
+        log.info('summon Ack carrying %s (HC_GACHA_ACK_PARTS)',
+                 ', '.join(sorted(parts)))
+    return sync, gacha.summons_count(p, gid if 'banner' in parts else -1)
 
 
 @handler(30062)
@@ -161,16 +248,7 @@ async def join_dimension_gacha(s, a):
     # got at login, GetGachaCount() stays 0, and the result page has no cube
     # to open -- which is what "The Dimension has dissipated. Moving onto
     # Dimension Select Page." (string 1106) is telling us.
-    if gid > 0 and not RICH_ACK:
-        p.take_dirty()                      # swallow the delta; send the lot instead
-        p.take_dirty_collections()
-        sync = state.check_info(vecAddResourceInfo=state.resource_infos(p))
-        count = gacha.summons_count(p, -1)
-    else:
-        sync = state.resource_sync(
-            p, vecAddUnitInfo=[state.unit_info(u) for u in added],
-            vecChangeDimensionGacha=[gacha.dimension(p, gid)] if gid > 0 else [])
-        count = gacha.summons_count(p, gid)
+    sync, count = summon_ack_shape(p, gid, added)
 
     if ACK_DELAY and gid > 0:
         log.info('holding the Ack back %.1fs (HC_GACHA_ACK_DELAY)', ACK_DELAY)
