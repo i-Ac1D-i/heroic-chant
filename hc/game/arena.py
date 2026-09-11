@@ -34,7 +34,7 @@ from datetime import datetime
 from ..data.tables import TABLES, to_int
 from ..protocol.dto import TYPES
 from ..settings import SETTINGS
-from . import state
+from . import state, artifacts
 
 log = logging.getLogger('hc.arena')
 
@@ -230,6 +230,24 @@ def playable_heroes():
     return cache
 
 
+def awaken_nodes(unit_id):
+    """Every partsInfoID this hero's awakening tree actually has.
+
+    Cached per hero: `unitAwakenPartsInfo` is large and `check_bot` walks it
+    once per team member otherwise.
+    """
+    cache = getattr(awaken_nodes, '_cache', None)
+    if cache is None:
+        cache = {}
+        for row in TABLES.sql('unitAwakenPartsInfo'):
+            uid = to_int(row.get('unitID'), -1)
+            node = to_int(row.get('partsInfoID'), -1)
+            if uid >= 0 and node >= 0:
+                cache.setdefault(uid, set()).add(node)
+        awaken_nodes._cache = cache
+    return cache.get(int(unit_id), set())
+
+
 def _clamp(value, low, high):
     return max(low, min(high, value))
 
@@ -304,6 +322,59 @@ def check_bot(bot, index=0):
         equip = [to_int(e, -1) for e in (u.get('equip') or [])][:4]
         equip += [-1] * (4 - len(equip))
 
+        # Awakening nodes.  Only ids this hero actually has are kept: an
+        # unknown partsInfoID would reach the client as an NGAwakenInfo for a
+        # node its own tree does not contain.
+        known = awaken_nodes(uid)
+        # The dashboard sends a count -- "the first N nodes" is how a player
+        # thinks about a tree, and shipping 24,266 node ids to the browser to
+        # let them tick boxes would be silly.  Explicit ids still win if given.
+        wanted_nodes = u.get('awaken')
+        if not wanted_nodes and to_int(u.get('awaken_count'), 0) > 0:
+            n = _clamp(to_int(u.get('awaken_count'), 0), 0, len(known))
+            if n != to_int(u.get('awaken_count'), 0):
+                problems.append('%s: this hero has %d awakening node(s)'
+                                % (hero_name, len(known)))
+            wanted_nodes = sorted(known)[:n]
+        awaken, bad = [], []
+        for node in (wanted_nodes or []):
+            node = to_int(node, -1)
+            if node in known and node not in awaken:
+                awaken.append(node)
+            elif node not in known:
+                bad.append(node)
+        if bad:
+            problems.append('%s: awakening node(s) %s do not exist for this '
+                            'hero, so they were dropped'
+                            % (hero_name, ', '.join(str(b) for b in bad)))
+
+        # Artifacts.  These are artifact *ids* here, not UIDs -- a bot owns
+        # nothing, so the artifact is synthesised for the fight in
+        # `opponent_lineup`.  NOTE: Artifacts, not the Scene Cards the UI calls
+        # Relics.  `relics` is read as a fallback so bots saved under the old
+        # key keep working.
+        # One per slot: this build only ships slot 7 artifacts, and two of
+        # them on one hero would fight over the same slot key.
+        relics, dropped, used = [], [], set()
+        for rid in (u.get('artifacts') or u.get('relics') or []):
+            rid = to_int(rid, -1)
+            if rid <= 0:
+                continue
+            rslot = artifacts.slot_of(rid)
+            if not artifacts.is_artifact(rid):
+                dropped.append(rid)
+            elif rslot in used:
+                problems.append('%s: only one relic fits slot %d, so %d was '
+                                'dropped' % (hero_name, rslot, rid))
+            else:
+                used.add(rslot)
+                relics.append(rid)
+        if dropped:
+            problems.append('%s: %s %s not wearable relic(s), so %s dropped'
+                            % (hero_name, ', '.join(str(x) for x in dropped),
+                               'is' if len(dropped) == 1 else 'are',
+                               'it was' if len(dropped) == 1 else 'they were'))
+
         units.append({
             'id': uid, 'level': level, 'tier': tier, 'grade': grade,
             'rareness': rareness,
@@ -312,6 +383,8 @@ def check_bot(bot, index=0):
             # back -- and 3 and 4 are not positions at all.
             'slot': DEFAULT_SLOTS[len(units)],
             'equip': equip,
+            'awaken': awaken,
+            'artifacts': relics,
         })
 
     if not units:
@@ -609,11 +682,24 @@ def opponent_lineup(match):
             slot = int(u.get('slot') or 0)
             if slot not in DEFAULT_SLOTS:
                 slot = DEFAULT_SLOTS[i]
+            uid = 900000 + i
+            # A bot owns no relics, so one is minted per fight with a UID in
+            # the same throwaway range as the unit.  It travels inside the
+            # unit's own vecArtifactInfo, which is what lets the attacker's
+            # client draw a relic it has never seen.
+            relics = [dict(artifacts.make(uid * 10 + n, rid), equip=uid)
+                      for n, rid in enumerate(u.get('artifacts')
+                                               or u.get('relics') or [])]
+            worn = {str(n + 1): e for n, e in enumerate(u['equip']) if e > 0}
+            for r in relics:
+                worn[str(artifacts.slot_of(r['id']))] = r['uid']
             out.append(({
-                'uid': 900000 + i, 'id': u['id'], 'level': u['level'],
+                'uid': uid, 'id': u['id'], 'level': u['level'],
                 'tier': u['tier'], 'grade': u['grade'], 'rareness': u['rareness'],
                 'power': u['level'] * 100,
-                'equip': {str(n + 1): e for n, e in enumerate(u['equip']) if e > 0},
+                'awaken': list(u.get('awaken') or []),
+                'relics': relics,
+                'equip': worn,
             }, slot))
         return out
 
@@ -621,7 +707,12 @@ def opponent_lineup(match):
     other = Player.load(int(match['account_id']))
     if other is None:
         return []
-    units = defense_units(other)[:MAX_TEAM]
+    # The attacker does not own the defender's relics and has no way to look
+    # them up, so each defending hero carries its own in NGUnitInfo.
+    # vecArtifactInfo.  Copy the unit rather than mutating the defender's save.
+    worn = state.worn_relics(other)
+    units = [dict(u, relics=worn.get(int(u['uid']), ()))
+             for u in defense_units(other)[:MAX_TEAM]]
     # Prefer the slots the defender actually chose -- but only if they are
     # real positions, for the same reason as the bot branch above.
     by_uid = {int(r.get('unit_uid', 0)): int(r.get('slot_index', 0))

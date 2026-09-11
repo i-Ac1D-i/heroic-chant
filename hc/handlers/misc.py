@@ -104,4 +104,4 @@ async def unit_favorites_change(s, a):
     unit['favorite'] = bool(a['_Favorites'])
     p.save()
     await s.send(40380, Err.OK,
-                 state.resource_sync(p, vecChangeUnitInfo=[state.unit_info(unit)]))
+                 state.resource_sync(p, vecChangeUnitInfo=state.unit_infos(p, [unit])))

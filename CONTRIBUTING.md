@@ -233,6 +233,13 @@ it drives the real HTTP API against a throwaway accounts directory and checks
 that a setting changed through the API actually changes what the game does.
 `python tools/test_arena.py` if you touched the arena -- it drives the
 real handlers for a one-player ladder and for two players fighting each other.
+`python tools/test_gacha_ack.py` if you touched summoning -- it pins down what
+each `HC_GACHA_ACK_PARTS` part puts on the wire, which is the open question
+there, and checks every shape still round-trips through the marshaller.
+`python tools/test_progression.py` if you touched hero progression, relics,
+artifacts, the Forge or the arena team builder -- star-up materials, the awakening reward ladder,
+rank-up, equipping relics, and what a bot opponent actually reaches the client
+as.
 `bash tools/test-termux-setup.sh` if you touched the installer. It's not a unit test suite, it's an
 end-to-end run against a real socket, which for this project catches more.
 

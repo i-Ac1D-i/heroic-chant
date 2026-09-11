@@ -474,12 +474,17 @@ What it was *not* -- each ruled out by a live test, all of them plausible:
 * `vecChangeDimensionGacha`
 * the reward contents
 
-What works is answering a summon with the same Ack *shape* as a screen-open:
-the whole wallet instead of a delta, and `NGGachaDaySummonsCount.GachaID = -1`.
-Those two things have never been varied independently, so that is exactly where
-the next attempt should start. `HC_GACHA_RICH_ACK=1` restores the fuller Ack for
-whoever picks it up. Remaining cost: a genuinely *new* hero is not announced, so
-it only shows after a relogin. Duplicates are unaffected.
+**Read that list carefully, because it is weaker than it looks.** Every one of
+those was tested by *removing* it from the fuller Ack and leaving the rest in.
+That shows none of them is individually *necessary*; it says nothing about
+which is *sufficient*. If two of the fields can each throw on their own,
+subtracting one at a time can never find either. See the eighth pass.
+
+What works is answering a summon with the same Ack *shape* as a screen-open.
+The claim that this differed from the natural Ack in two ways was wrong -- it
+differs in five. `HC_GACHA_ACK_PARTS` now adds them back one at a time.
+Remaining cost: a genuinely *new* hero is not announced, so it only shows after
+a relogin. Duplicates are unaffected.
 
 Still open: the "dissipated" popup itself. It is now dismissable and the pull is
 saved, so it is cosmetic.
@@ -670,3 +675,288 @@ Note that the per-unit `MaxGrade` and `NormalTierMax` in `UnitList` are *not*
 hard limits -- 1,220 shipped members exceed both, and 1,476 use heroes with no
 `unitGradeStatInfo` rows at all. The client tolerates all of that, so the
 validator does too. Only the slot is fatal.
+
+## Eighth pass: reading the client for the summon crash
+
+No device time this pass. The summon Ack was chased entirely through
+`libil2cpp.so` with `tools/disasm.py`, which turned out to answer more than the
+live tests had.
+
+### The handler, confirmed
+
+`JoinDimensionGachaAck` is `NGNetGameServer` @0x14EBE38, and `dump.cs` gives its
+signature as
+
+```
+bool JoinDimensionGachaAck(int Error, NGCheckServerInfo, NGGachaDaySummonsCount,
+                           NGPairInt2, NGIntIntInt, NGGachaChoiceCubeInfo)
+```
+
+which is the order `hc/handlers/gacha.py` already sends, so the argument list is
+not the problem. It runs, in order: `AddGachaLimitInfo`, then
+`CheckServerInfo(_info, ref changeValue)`, then
+`RewardDisplayList(changeValue)`, then a walk over the dimension-gacha lists to
+work out which summon animation to play, then `_JoinDimensionGachaAck.OnNext`.
+
+The whole thing, including that last call, runs inside `NGNetGameServer`'s
+catch. So "the exception is in the Ack" does **not** narrow it to the handler --
+every UI subscriber runs inside it too.
+
+### `GachaID` cannot be the trigger
+
+`NMUserInfo.AddGachaLimitInfo` @0x13A3104 does exactly one thing with the value:
+
+```
+_dic[item.GachaID] = item        ; a Dictionary indexer *set*
+```
+
+It throws only if `item` is null, or the dictionary itself is null -- never
+because of what the id happens to be. A set cannot miss. So the older note's
+second hypothesis, "-1 versus the banner id", is **dead**, and the `banner` part
+below exists only to close it out on the device.
+
+### Where the handler really can throw
+
+Every il2cpp null check in this function ends at `bl 0x1178F00`, the
+`NullReferenceException` thunk. The ones that depend on what we send are all in
+the dimension-gacha walk, and none of them has a skip path:
+
+| Site | Throws when |
+|---|---|
+| @0x14EC1E8 | an entry of `vecAddDimensionGacha ++ vecChangeDimensionGacha` is null |
+| @0x14EC1EC | `NGDimensionGacha.vecSummon` (+0x20) is null |
+| @0x14EC2F4 | any `NGDimensionGachaSummon.ProductInfo` (+0x20) is null |
+
+`NGCheckServerInfo` +0xA0 and +0xA8 are `vecAddDimensionGacha` and
+`vecChangeDimensionGacha`, from `dump.cs`. Note this walk is skipped entirely
+when both lists are empty -- which is exactly what the workaround does.
+
+Deeper, `NMUserInfo.AddDimensionGacha(NGDimensionGacha)` @0x137CA98 ends in
+`_dicDimensionGacha[ngInfo.ID] = ngInfo` and throws if that static
+(`NMUserInfo` +0xC0) is null. It is reached once per list entry, so an empty
+list cannot trip it and a one-entry list will. That shape -- empty is safe, one
+entry is fatal -- matches the symptom better than anything else found.
+
+`tools/test_gacha_ack.py` asserts our own `vecSummon` and `ProductInfo` are
+always populated, so the first three sites are ours to keep clean, not ours to
+blame.
+
+### The five parts
+
+The safe shape differs from the natural one in five independent ways, not two.
+`HC_GACHA_ACK_PARTS` adds them back one at a time:
+
+| Part | What it puts back |
+|---|---|
+| `wallet` | `vecAddResourceInfo` carries the delta, not the whole wallet |
+| `collections` | `vecAddCollectionInfo` carries the counters that changed |
+| `units` | `vecAddUnitInfo` announces a genuinely new hero |
+| `dimension` | `vecChangeDimensionGacha` carries the banner and its cube |
+| `banner` | `NGGachaDaySummonsCount.GachaID` is the banner id, not -1 |
+
+`HC_GACHA_ACK_PARTS=all` is the pre-workaround Ack, and `HC_GACHA_RICH_ACK=1`
+still means the same thing. Unset is the safe shape, so the default has not
+changed.
+
+Two of the five can be reasoned about without touching a device.
+`wallet` and `collections` are both already exercised by the *screen-open* Ack,
+which takes the same code path and has never thrown -- so neither is likely.
+`units` is empty in practice on a full 138-hero roster, which is what the test
+account has. That leaves `dimension` as the one to try first, and it is also the
+only part whose absence explains the leftover *"The Dimension has dissipated"*
+popup. **Those two open items are probably one bug.**
+
+### Also fixed
+
+`tools/disasm.py` died with a `UnicodeEncodeError` part-way through any dump
+containing a Korean or accented string annotation, because a Windows console is
+cp1252. It now forces UTF-8 on stdout. The interesting code is usually further
+down than the first such string, so this was losing whole dumps.
+
+## Ninth pass: progression gaps, relics, and a fuller bot builder
+
+Five reports off the back of real play. Four were the same shape underneath:
+the client had a screen for something the server had never implemented, so the
+button did nothing and nothing was logged as wrong.
+
+### "Hero Q has no Memories"
+
+Not a Q problem. `GradeUpMaterial` charges `ResourceType.UnitPieces` (16) keyed
+by the hero's own unit id from grade 2 on -- 80, 160, 240, then 320 -- and
+**nothing in this server ever paid out type 16**. The only source the real game
+had here was an SS-or-better duplicate summon, so any hero pulled once was stuck
+at 3 stars forever. New accounts now start with 1,000 of each hero's Memory
+(`account.starting_memories`, 0 turns it off). That is +138 wallet rows at
+login, taking the payload from 149 resources to 287, which is nowhere near
+`MAX_PACKET_SIZE`.
+
+Q's Memory *was* in the dashboard's catalogue all along. The picker was the
+problem: it filtered, took the first 200 hits **in table order**, and only then
+sorted. Searching `q` matches every name containing a q, so the row wanted was
+never in the 200 that survived. It now scores matches -- exact, then
+word-start, then substring, shorter names first -- and cuts to the limit
+*after* ranking. Searching `q` puts "Q" first and "Q's Memory" second.
+
+### Awakening rewards and rank-up were unhandled packets
+
+Both existed in the spec and had no handler, so the request decoded, logged and
+vanished.
+
+* **30101 `UnitAwakenRewardReq`** -> the milestone passives.
+  `UnitList.awakenRewardGroup` picks a ladder in `unitAwakenReward`; each rung's
+  `conditionValue` is how many nodes must be open (group 1 wants 5/10/15/20,
+  group 2 wants 4/8/12/16) and pays Gold. `NGUnitInfo.AwakenRewardGrade` is how
+  many rungs are claimed. The handler pays **every** rung earned, not just the
+  next one, because players have been awakening heroes while this did nothing.
+  Careful with that table: `resourceType1/2/3` is one resource's
+  (Type1, Type2, Type3), not three resources.
+* **30232 `UnitRarenessUpgradeReq`** -> A / S / SS / SSS.  `rarenessInfo` is the
+  whole rule, one row per (unitID, currentRareness): four costs,
+  `resultRareness`, and `reqAwakenRoleStat`. That last one points at
+  `unitAwakenRoleStat`, whose `openAwakenCnt` is the real gate -- 11 nodes, then
+  20, then 29. **It is an awakening gate, not a star gate**, which is why
+  starring a hero up never unlocked rank-up.
+
+### Relics were never implemented, and could not have worked
+
+Relics are the client's Artifacts, and they are not gear. Gear stacks in the
+wallet as `ResourceType.Item` (5) keyed by itemID; a relic is a per-instance
+object with its own UID, living in `NMUserInfo._artifact` and arriving in
+`NGLoginAckLargeData.vecArtifactInfo`. The server had no artifact storage, sent
+none at login, and handled none of the artifact packets.
+
+The equipping half was broken independently. Relics come through the *same*
+`UnitEquipInfoChangeReq` (30007) gear uses, but with `EItemType.ArtifactWeapon`
+(**7**) in ItemType and the relic's **UID** in ItemKey -- which is why ItemKey
+is a `long`. The old handler read that UID as a stackable item id, looked for it
+in the wallet, found nothing and silently refused. So even a player who somehow
+had relics could not have worn one.
+
+Now in: `hc/game/artifacts.py`, per-instance storage on the player, a starter
+set (`account.starting_relics`), the login payload, equip/unequip/steal through
+slot 7, and levelling by feeding relics (30014, worn and locked ones refused,
+matching the client's own `Error_MaterialArtifactVaildEquipUnitUID`). Not in:
+random stat rolls, unique effects, option enhancement, tier-up, manufacture.
+
+Two data facts worth keeping. Every one of the 216 wearable relics is
+`itemType` 7 -- `EItemType` defines ArtifactArmor (8) but this build ships none,
+so there is one relic slot. `itemType` 12 is `MaterialArtifact`, the seven rows
+at 50001..50007, which are fodder and not wearable.
+
+**`NGUnitInfo.vecArtifactInfo` is the important find.** A unit carries the
+relics it is wearing *inline*. That is the only way an opponent's relic can be
+drawn at all -- the viewer does not own it and has no other way to learn what it
+is. `state.unit_infos(player, units)` attaches them; use it instead of a bare
+`unit_info` comprehension anywhere a player's units go to a client, or a hero
+shows a relic in `vecEquipInfo` with no relic behind it.
+
+### The arena bot builder
+
+Bots already carried gear (four item ids), which the dashboard never exposed.
+They now also carry awakening and a relic, and the builder exposes all of it.
+
+A bot owns nothing, so its relic is **minted per fight** with a throwaway UID
+alongside the throwaway unit UID, and travels inside that unit's own
+`vecArtifactInfo`. Validation follows the same repair-don't-reject rule as the
+rest of `check_bot`: a node id the hero's tree does not contain is dropped, a
+material artifact is not wearable, and only one relic fits a slot.
+
+Awakening goes over the wire as `awaken_count` -- "the first N nodes" is how a
+player thinks about a tree, and shipping 24,266 `unitAwakenPartsInfo` rows to
+the browser to tick boxes would be absurd. Explicit ids still win if given.
+Gear is searched through the new `/api/items` endpoint rather than sent whole,
+because `itemList` is 2,526 rows against 216 relics.
+
+## Tenth pass: Relics are not Artifacts, and the Forge
+
+Five reports. One of them turned into a naming correction that invalidates part
+of the ninth pass's wording, so read this before trusting any sentence with
+"relic" in it.
+
+### The client calls two different things by two names, and we had them crossed
+
+| UI says   | protocol and tables say | ResourceType | EItemType slots | forge |
+|-----------|-------------------------|--------------|-----------------|-------|
+| **Relic** | SceneCard               | 42           | 9, 10, 11       | yes   |
+| Artifact  | Artifact                | 8            | 7 (8 unused)    | no    |
+
+The ninth pass implemented **Artifacts** and called them relics throughout. The
+code was right, the word was wrong, and the user's reports were always about
+Scene Cards. The evidence, none of it inference:
+
+* string 11593 -- *"Relic Craft KIT: A material used in crafting of Relic.
+  Relic can be crafted at the Forge."* That names ResourceType **127**, whose
+  own display name is "Craft KIT", and 127 is what `sceneCardCreateCost`
+  charges. Nothing in the artifact tables costs 127.
+* the Forge's classes are all `DimensionHephaiForgeSceneCard*` and its packets
+  are `SceneCardManufactureReq` and friends. Strings 11449 "The Forge", 11428
+  "Hohoians' Forge", 11426 "Craft Relic!".
+* `AwakenRewardRelic.UpdateUI` @0x1BC2078 -- the awakening tree's relic node --
+  calls `NMUnit.GetUnitAwakenBonusReward(unitID, partsInfoID)`, and every row
+  of `unitAwakenBonusReward` pays ResourceType 42.
+* `sceneCardInfo.itemType` is 9 for all 144 cards: `EItemType.SceneCardSlot1`.
+
+Wording is corrected everywhere; behaviour of the artifact code is unchanged.
+`account.starting_relics` became `account.starting_artifacts` and the arena bot
+field `relics` became `artifacts`, both with the old key read as a fallback so
+an existing `settings.json` keeps working.
+
+### Why rank-up to SSS stayed locked
+
+Not the star count, and not the raw node count either. `rarenessInfo`
+.`reqAwakenRoleStat` names a `unitAwakenRoleStat` row, and that stat has to be
+**claimed** through `AwakenStatOpenReq` (**30228**) -- the Awakening Passive
+Mastery slot. 30228 had no handler, so the claim button did nothing and the
+stat could never be held, which locked rank-up permanently however many stars
+or nodes a hero had. The ninth pass checked `openAwakenCnt` directly, which is
+the condition for the stat becoming *claimable*, not the same thing.
+
+Now: 30228 records the claim, `NGLogInAck03.vecAwakenStat` replays it (we sent
+that packet empty before, so it would have been forgotten on every relogin
+anyway), and rank-up checks the claimed set.
+
+`UnitAwakenStateChangeReq` (**30093**) was also unhandled -- toggling a node on
+or off. `unitAwakenPartsInfo.isRecall` says whether a node may be switched off
+and `radioBoxGroup` makes siblings mutually exclusive; both are honoured.
+
+### The awakening tree's own Relic
+
+`unitAwakenBonusReward` pays one Scene Card at node **1002** for 32 heroes --
+that hero's own Relic. `UnitAwakenReq` never granted it, so the node showed a
+reward and handed over nothing. It does now, and the card goes back in
+`vecAddSceneCard`.
+
+### The Forge
+
+Four craft slots (`sceneCardCreateSlot`; slot 1 free, 2 and 3 cost gold, 4
+costs cash). A craft spends a chosen hero's Memory plus Craft KIT
+(`sceneCardCreateCost`, keyed by `CreateLv`, 2/5/8/18/30 pieces), rolls a grade
+off that row's own `Grade_1..5_Percent`, and produces one relic:
+
+* `sceneCardCreateUnitBonus` has a row for (hero, rolled grade) -> that exact
+  card, every shipped row being `Fixed_Reward = 1`. This is how a hero's own
+  relic is crafted.
+* otherwise a uniform pick among cards of that `startGrade`, minus the ones
+  that only exist as fixed or awakening rewards. 66 of the 108 grade-5 cards
+  remain, so the pool is not thin.
+
+Handlers: 30154 slot open, 30155 manufacture, 30156 immediate commit, 30157
+collect, plus 30106 level up, 30161 sell, 30183 lock. Every refusal path
+matches a named client error (strings 11564..11585, 5281, 5284, 5289).
+
+**One number here is not from the client's data.** No table carries a craft
+duration -- not `sceneCardCreateCost`, not `sceneCardCreateSlot`, not any
+neighbour -- so it was a server policy value on the real service and it is one
+here: `forge.craft_seconds`, default 0, meaning collectable at once. It is
+flagged in `hc/game/scenecards.py` rather than buried.
+
+New accounts now also start with 20,000 Craft KIT, or the Forge is unusable
+from a standing start.
+
+### The logs
+
+`server/logs/game.log` is from 8 September and predates all of this, so it
+could not show the session being asked about. The unhandled packets were found
+by diffing the registered handler list against the 859-packet spec instead,
+which is exact. If a game server log from a later run turns up, it is worth a
+second pass for packets nobody has hit yet.

@@ -53,6 +53,10 @@ STARTING_TYPED_RESOURCES[(12, -1)] = 10_000             # Evolution material
 STARTING_TYPED_RESOURCES[(144, -1)] = 1_000             # Refined Essence
 STARTING_TYPED_RESOURCES[(115, -1)] = 5_000             # Essence of Abyss
 STARTING_TYPED_RESOURCES[(33, -1)] = 500                # summon tickets
+# ArtifactMaterial (127) is the Forge's "Craft KIT" -- string 11593 calls it
+# the Relic Craft KIT and says relics are crafted at the Forge.  A level-5
+# craft costs 3,000, so this is a handful of good crafts to start with.
+STARTING_TYPED_RESOURCES[(127, -1)] = 20_000
 
 
 def _starting_gear():
@@ -76,7 +80,42 @@ def _starting_gear():
     return out
 
 
+def _starting_memories():
+    """A stock of every hero's own Memory, so star-up can get past 3 stars.
+
+    `GradeUpMaterial` charges ResourceType.UnitPieces (16) keyed by the hero's
+    own unit id from grade 2 onwards -- 80, then 160, 240 and 320, so 800 takes
+    one hero from 3 stars to 6.  Nothing else in this server pays out type 16:
+    the only source the real game had here is an SS-or-better duplicate summon,
+    which means a hero you pulled once could never be starred up at all.  That
+    is what "hero X has no memories" is.
+
+    Seeded per hero rather than as one generic currency because the client
+    charges per hero and shows "<name>'s Memory" for each.  Set
+    ``account.starting_memories`` to 0 in the dashboard to turn this off and
+    make duplicates matter again.
+    """
+    from ..data.tables import TABLES, to_int
+    each = SETTINGS.get('account.starting_memories', 1000)
+    if int(each) <= 0:
+        return {}
+    out = {}
+    for row in TABLES.sql('UnitList'):
+        if to_int(row.get('IsPlayerHero')) != 1:
+            continue
+        # UnitPieceID is the shard's own id.  It equals UnitID for all 138
+        # player heroes in this build, but the client charges by whichever the
+        # table says, so follow the table.
+        piece = to_int(row.get('UnitPieceID'), -1)
+        if piece < 0:
+            piece = to_int(row.get('UnitID'), -1)
+        if piece >= 0:
+            out[(ResourceType.UnitPieces, piece)] = int(each)
+    return out
+
+
 STARTING_TYPED_RESOURCES.update(_starting_gear())
+STARTING_TYPED_RESOURCES.update(_starting_memories())
 
 
 def _rk(t1, t2=-1, t3=-1):
@@ -151,11 +190,16 @@ class Player(object):
             'collections': {},      # "t1:t2:t3" -> counter (see CollectionType)
             'tutorials': list(range(1, 200)),   # skip the tutorial gate
             'commanders': [{'id': 1, 'level': 1, 'tier': 1}],
+            'artifacts': [],     # Artifacts: per-instance, not wallet rows
+            'scenecards': [],    # Relics (Scene Cards): likewise
+            'forge': {},         # craft slots, keyed by slot index
+            'awaken_stats': [],  # opened awakenRoleStatIDs
             'missions_done': [],
             'afk_claimed': now,     # City Search: last time idle rewards were taken
         })
         if SETTINGS.get('account.grant_all_heroes', True):
             pl.grant_starter_units()
+        pl.grant_starter_relics()
         pl.save()
         return pl
 
@@ -267,6 +311,97 @@ class Player(object):
 
     def find_unit(self, uid):
         return next((u for u in self.d['units'] if u['uid'] == int(uid)), None)
+
+    # -- relics (artifacts) ------------------------------------------------
+    #
+    # Relics are per-instance objects with their own UID, not stackable wallet
+    # rows, so they get their own list.  `artifacts` is created lazily because
+    # saves written before relics existed will not have the key.
+    def artifacts(self):
+        return self.d.setdefault('artifacts', [])
+
+    def find_artifact(self, uid):
+        return next((a for a in self.artifacts() if a['uid'] == int(uid)), None)
+
+    def add_artifact(self, artifact_id):
+        from . import artifacts as art
+        a = art.make(self.new_uid(), artifact_id)
+        self.artifacts().append(a)
+        return a
+
+    def remove_artifact(self, uid):
+        a = self.find_artifact(uid)
+        if a is not None:
+            self.artifacts().remove(a)
+        return a
+
+    def artifact_in_slot(self, unit_uid, slot):
+        """Whatever relic is currently worn by `unit_uid` in `slot`."""
+        from . import artifacts as art
+        for a in self.artifacts():
+            if int(a.get('equip', 0) or 0) == int(unit_uid)                     and art.slot_of(a['id']) == int(slot):
+                return a
+        return None
+
+    # -- relics (Scene Cards) ----------------------------------------------
+    #
+    # "Relic" is what the English UI calls a Scene Card.  These are NOT the
+    # artifacts above -- different resource type, different equip slots,
+    # different forge.  See hc/game/scenecards.py for the evidence.
+    def scenecards(self):
+        return self.d.setdefault('scenecards', [])
+
+    def find_scenecard(self, uid):
+        return next((r for r in self.scenecards() if r['uid'] == int(uid)), None)
+
+    def add_scenecard(self, card_id):
+        from . import scenecards as sc
+        r = sc.make(self.new_uid(), card_id)
+        self.scenecards().append(r)
+        return r
+
+    def remove_scenecard(self, uid):
+        r = self.find_scenecard(uid)
+        if r is not None:
+            self.scenecards().remove(r)
+        return r
+
+    def scenecard_in_slot(self, unit_uid, slot):
+        for r in self.scenecards():
+            if int(r.get('equip', 0) or 0) == int(unit_uid)                     and int(r.get('slot', 0) or 0) == int(slot):
+                return r
+        return None
+
+    # -- the forge ---------------------------------------------------------
+    def forge(self):
+        """{"<slot>": {"open": bool, "card": id, "grade": n, "end": iso}}"""
+        return self.d.setdefault('forge', {})
+
+    def forge_slot(self, slot_index):
+        return self.forge().setdefault(str(int(slot_index)), {})
+
+    def forge_slot_open(self, slot_index):
+        from . import scenecards as sc
+        if int(slot_index) == sc.free_slot():
+            return True
+        return bool(self.forge_slot(slot_index).get('open'))
+
+    # -- awakening passive mastery ----------------------------------------
+    def awaken_stats(self):
+        """Opened awakenRoleStatIDs.  Replayed in NGLogInAck03.vecAwakenStat."""
+        return self.d.setdefault('awaken_stats', [])
+
+    def open_awaken_stat(self, stat_id):
+        stats = self.awaken_stats()
+        if int(stat_id) not in stats:
+            stats.append(int(stat_id))
+            return True
+        return False
+
+    def grant_starter_relics(self):
+        from . import artifacts as art
+        for artifact_id in art.starter_set():
+            self.add_artifact(artifact_id)
 
     def grant_starter_units(self):
         """Give one copy of every playable hero, so the whole roster is usable."""

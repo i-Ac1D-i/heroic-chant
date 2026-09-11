@@ -5,7 +5,7 @@ from datetime import datetime
 from .. import config
 from ..net import handler
 from ..protocol.dto import TYPES
-from ..game import state, gacha, guild, shop
+from ..game import state, gacha, guild, shop, artifacts, scenecards
 from ..game.errors import Err
 from ..game.player import Player
 from .center import account_for_device
@@ -45,7 +45,14 @@ def _large_data(player):
     return TYPES['NGLoginAckLargeData'](
         vecResource=state.resource_infos(player),
         vecCollectionInfo=state.collection_infos(player),
-        vecUnit=[state.unit_info(u) for u in player.d['units']],
+        # Relics live here, not in the wallet -- they are per-instance objects
+        # with their own UIDs.  Without this the relic screen is empty and
+        # nothing can be equipped.
+        vecArtifactInfo=artifacts.infos(player),
+        # Relics.  Same story as artifacts: per-instance, own UIDs, and the
+        # relic screen is empty without them.
+        vecSceneCardInfo=scenecards.infos(player),
+        vecUnit=state.unit_infos(player),
         vecPartyInfo=[state.party_info(p) for p in player.d.get('party', [])],
         vecShopGoods=shop.all_shop_goods(player),
         bEndPacket=True,
@@ -71,7 +78,13 @@ async def login(s, a):
 
     await s.send(40000, _ack01(player))
     await s.send(40001, TYPES['NGLogInAck02']())
-    await s.send(40002, TYPES['NGLogInAck03']())
+    # vecAwakenStat is the account's claimed Awakening Passive Mastery stats.
+    # Without it every one of them reads as unclaimed after a relogin, and
+    # rank-up -- which is gated on the stat, not on the star count -- locks
+    # itself again.
+    await s.send(40002, TYPES['NGLogInAck03'](
+        vecAwakenStat=[TYPES['NGAwakenStat'](AwakenStatID=int(sid), State=1)
+                       for sid in player.awaken_stats()]))
     await s.send(40003, TYPES['NGLogInAck04'](customStringData=''))
     shop_info, shop_goods_info, count_price = shop.shop_tables()
     await s.send(40004, TYPES['NGLogInAck05'](

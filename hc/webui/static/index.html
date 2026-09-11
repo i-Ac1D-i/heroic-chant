@@ -271,6 +271,14 @@
       <div><label>Level</label><input id="botLvl" type="number" value="60" min="1"></div>
       <div><label>Stars</label><input id="botGrade" type="number" value="3" min="0" max="6"></div>
       <div><label>Rarity</label><select id="botRare"></select></div>
+      <div><label>Awakening nodes</label><input id="botAwaken" type="number" value="0" min="0"></div>
+    </div>
+    <div class="row">
+      <div style="flex:1 1 170px"><label>Weapon</label><select id="botGear1"></select></div>
+      <div style="flex:1 1 170px"><label>Armor</label><select id="botGear2"></select></div>
+      <div style="flex:1 1 170px"><label>Gloves</label><select id="botGear3"></select></div>
+      <div style="flex:1 1 170px"><label>Boots</label><select id="botGear4"></select></div>
+      <div style="flex:1 1 200px"><label>Artifact</label><select id="botRelic"></select></div>
       <div style="flex:0 0 auto"><button class="ghost" id="botAddUnit">Add hero</button></div>
     </div>
     <div class="row"><div style="flex:1 1 100%" id="botHint" class="muted"></div></div>
@@ -680,7 +688,14 @@ let LIMITS = {max_team: 4, grade_max: 6, rareness_max: 3, tier_caps: {}, heroes:
 
 function teamSummary(units) {
   if (!units.length) return '<span class="muted">empty</span>';
-  return units.map(u => `${u.name} <span class="muted">L${u.level}</span>`).join(', ');
+  return units.map(u => {
+    const extra = [];
+    if (u.awaken) extra.push(`${u.awaken}aw`);
+    if (u.gear) extra.push(`${u.gear}g`);
+    if ((u.artifacts || []).length) extra.push('artifact');
+    const tail = extra.length ? ' ' + extra.join('/') : '';
+    return `${u.name} <span class="muted">L${u.level}${tail}</span>`;
+  }).join(', ');
 }
 async function loadArena() {
   ARENA = await api('/arena');
@@ -737,6 +752,8 @@ async function loadArena() {
     $('#botGrade').max = LIMITS.grade_max;
     $('#botHero').onchange = syncHeroLimits;
     $('#botTier').onchange = syncHeroLimits;
+    fillRelics();
+    fillGear();
     syncHeroLimits();
   }
 }
@@ -751,6 +768,12 @@ function syncHeroLimits() {
   const lvl = $('#botLvl');
   lvl.max = cap;
   if (parseInt(lvl.value || '1', 10) > cap) lvl.value = cap;
+  // Every hero's tree is a different size -- 96 nodes on one, far fewer on
+  // another -- so the ceiling follows the hero.
+  const nodes = hero ? (hero.nodes || 0) : 0;
+  const aw = $('#botAwaken');
+  aw.max = nodes;
+  if (parseInt(aw.value || '0', 10) > nodes) aw.value = nodes;
   const base = hero ? hero.rareness : 0;
   const want = parseInt($('#botRare').value || base, 10);
   let opts = '';
@@ -762,7 +785,8 @@ function syncHeroLimits() {
   $('#botHint').textContent = DRAFT.length >= (LIMITS.max_team || 4)
     ? `The team is full — ${LIMITS.max_team || 4} heroes is the maximum.`
     : `Goes in ${slot}. Level 1–${cap} at this tier; ${RARITY[base]} is `
-      + `${hero ? hero.name : 'this hero'}'s natural rarity and cannot go lower.`;
+      + `${hero ? hero.name : 'this hero'}'s natural rarity and cannot go lower. `
+      + `Awakening 0–${nodes} node(s).`;
 }
 function renderArenaSettings() {
   $('#arSeason').value = SET.arena.season;
@@ -784,13 +808,47 @@ $('#arSave').onclick = async () => {
 // The order they are added is the order they are placed.
 const SLOT_NAMES = ['Front 1', 'Front 2', 'Back 1', 'Back 2'];
 
+// The bits of a bot hero that are not always set, so the draft chip stays
+// short when they are not.
+function draftExtras(u) {
+  const bits = [];
+  if (u.awaken_count > 0) bits.push(`${u.awaken_count} awakened`);
+  const gear = (u.equip || []).filter(e => e > 0).length;
+  if (gear) bits.push(`${gear} gear`);
+  if ((u.artifacts || []).length) {
+    const r = (LIMITS.artifacts || []).find(x => x.id === u.artifacts[0]);
+    bits.push('artifact ' + (r ? r.name : u.artifacts[0]));
+  }
+  return bits.length ? ` <span class="muted">· ${bits.join(' · ')}</span>` : '';
+}
+
+// Gear is searched rather than shipped whole -- itemList is 2,526 rows. One
+// request per slot, best grade first, with "nothing" always available.
+async function fillGear() {
+  for (const n of [1, 2, 3, 4]) {
+    const sel = $('#botGear' + n);
+    if (sel.options.length) continue;
+    const {items} = await api(`/items?slot=${n}&limit=120`);
+    sel.innerHTML = '<option value="-1">Nothing</option>' + items.map(
+      it => `<option value="${it.id}">${it.name} (${it.id})</option>`).join('');
+  }
+}
+
+function fillRelics() {
+  const sel = $('#botRelic');
+  if (sel.options.length || !LIMITS.artifacts) return;
+  sel.innerHTML = '<option value="-1">Nothing</option>' + LIMITS.artifacts.map(
+    r => `<option value="${r.id}">${r.name} — grade ${r.grade} (${r.id})</option>`
+  ).join('');
+}
+
 function renderDraft() {
   $('#botDraft').innerHTML = DRAFT.length
     ? DRAFT.map((u, i) =>
         `<span class="pill" style="margin-right:6px">
          <span class="muted">${SLOT_NAMES[i]}</span>
          ${(LIMITS.heroes && LIMITS.heroes[u.id] || {}).name || u.id}
-         L${u.level} T${u.tier} ★${u.grade} ${RARITY[u.rareness]}
+         L${u.level} T${u.tier} ★${u.grade} ${RARITY[u.rareness]}${draftExtras(u)}
          <a href="#" data-drop="${i}"
          style="color:var(--bad);text-decoration:none">✕</a></span>`).join('')
     : 'No heroes added yet.';
@@ -818,8 +876,16 @@ $('#botAddUnit').onclick = () => {
   if (grade < 0 || grade > LIMITS.grade_max) {
     return toast(`Stars must be 0–${LIMITS.grade_max}`, true);
   }
+  // Gear is four item ids by slot; the artifact is an id, not a UID --
+  // a bot owns nothing, so the server mints the relic per fight.  Awakening
+  // goes as a count and the server turns it into that hero's first N nodes.
+  const equip = [1, 2, 3, 4].map(n => parseInt($('#botGear' + n).value || '-1', 10));
+  const relic = parseInt($('#botRelic').value || '-1', 10);
   DRAFT.push({id, level, tier, grade,
-              rareness: parseInt($('#botRare').value || '0', 10)});
+              rareness: parseInt($('#botRare').value || '0', 10),
+              awaken_count: parseInt($('#botAwaken').value || '0', 10),
+              equip,
+              artifacts: relic > 0 ? [relic] : []});
   renderDraft();
   syncHeroLimits();
 };

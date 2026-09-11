@@ -66,8 +66,24 @@ def equip_info(u):
     return out
 
 
-def unit_info(u):
+def unit_info(u, relics=None):
+    """One NGUnitInfo.
+
+    `relics` is what this hero is wearing, as stored relic dicts.  They ride on
+    the unit rather than being looked up client-side, which is what makes an
+    *opponent's* relics renderable at all: the viewer does not own that relic
+    and has no other way to learn what it is.  Falls back to ``u['relics']`` so
+    a synthesised unit -- an arena bot -- can carry its own.
+    """
+    from . import artifacts, scenecards
+    if relics is None:
+        relics = u.get('relics') or ()
+    cards = u.get('scenecards') or ()
     return TYPES['NGUnitInfo'](
+        vecArtifactInfo=[artifacts.info(r) for r in relics],
+        # Relics (Scene Cards) ride on the unit for the same reason artifacts
+        # do: an opponent's client owns none of them and cannot look them up.
+        vecSceneCardInfo=[scenecards.info(c) for c in cards],
         UID=u['uid'], ID=u['id'], Level=u.get('level', 1),
         Tier=u.get('tier', 1), Grade=u.get('grade', 1),
         Favorite=bool(u.get('favorite')), HeroDungeonFavorite=False,
@@ -81,6 +97,45 @@ def unit_info(u):
         TotalPower=u.get('power', u.get('level', 1) * 100),
         currentRareness=u.get('rareness', 0),
     )
+
+
+def worn_relics(player):
+    """{unit uid: [artifact, ...]} for every artifact the player has equipped.
+
+    Named for the UI's word at the time; these are Artifacts (ResourceType 8),
+    not the Scene Cards the UI now calls Relics.  `worn_scenecards` is those.
+    """
+    out = {}
+    for a in player.artifacts():
+        uid = int(a.get('equip', 0) or 0)
+        if uid:
+            out.setdefault(uid, []).append(a)
+    return out
+
+
+def worn_scenecards(player):
+    """{unit uid: [relic, ...]} for every Scene Card the player is wearing."""
+    out = {}
+    for c in player.scenecards():
+        uid = int(c.get('equip', 0) or 0)
+        if uid:
+            out.setdefault(uid, []).append(c)
+    return out
+
+
+def unit_infos(player, units=None):
+    """`unit_info` for many of a player's units, relics attached.
+
+    Use this instead of a bare `unit_info` comprehension anywhere a *player's*
+    units go to a client, or the hero will show an equipped relic in
+    vecEquipInfo with no relic data behind it.
+    """
+    worn = worn_relics(player)
+    cards = worn_scenecards(player)
+    rows = player.d['units'] if units is None else units
+    return [unit_info(dict(u, scenecards=cards.get(int(u['uid']), ())),
+                      worn.get(int(u['uid']), ()))
+            for u in rows]
 
 
 def party_info(p):

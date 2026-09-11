@@ -111,23 +111,83 @@ def _name_map(keys):
     return out
 
 
+def _score(name, key, query):
+    """Lower is better.  None means "does not match at all".
+
+    Ranked rather than filtered because the catalogue is 4,650 rows and a short
+    query matches a lot of them: searching `Q` for "Q's Memory" hits every name
+    with a q in it.  The old version took the first 200 hits in table order and
+    only *then* sorted, so the row the user wanted was usually not among them.
+    That is the whole of "it is not even in the dashboard".
+    """
+    if not query:
+        return 2
+    low = name.lower()
+    if low == query:                        # "q" -> "Q"
+        return 0
+    if key == query or key.startswith(query + ':'):
+        return 0
+    # A word starting with the query: "q" -> "Q's Memory", "Queen's Blade".
+    if any(w.startswith(query) for w in re.split(r"[^a-z0-9]+", low) if w):
+        return 1
+    if low.startswith(query):
+        return 1
+    if key.startswith(query):
+        return 2
+    if query in low:
+        return 3
+    return None
+
+
 def _catalogue(query='', limit=200):
     """Every nameable resource, for the add-a-resource picker.
 
     4,650 rows is too much to push at the browser on every load, so this is a
-    search: the dashboard sends what the user typed.
+    search: the dashboard sends what the user typed.  Best matches first, and
+    the cut to `limit` happens *after* ranking, never before.
     """
     query = (query or '').strip().lower()
-    out = []
+    scored = []
     for (t1, t2, t3), name in TABLES.resource_names().items():
         key = '%d:%d:%d' % (t1, t2, t3)
-        if query and query not in name.lower() and not key.startswith(query):
+        rank = _score(name, key, query)
+        if rank is None:
             continue
-        out.append({'key': key, 'name': name})
-        if len(out) >= limit:
-            break
-    out.sort(key=lambda r: r['name'])
-    return out
+        # Shorter names first inside a rank: for "q" that puts "Q's Memory"
+        # above "Heart Heater's Quest House Contract".
+        scored.append((rank, len(name), name.lower(), name, key))
+    scored.sort()
+    return [{'key': k, 'name': n} for _, _, _, n, k in scored[:limit]]
+
+
+def _gear(query='', slot=-1, limit=100):
+    """Equippable items for one gear slot, ranked the same way resources are.
+
+    `itemList.itemType` is the slot: 1 Weapon, 2 Armor, 3 Gloves, 4 Boots --
+    the same numbers `NGUnitEquipInfo.ItemType` carries for gear, and the
+    reason relics had to be given 7 and 8 instead.
+    """
+    strings = TABLES.strings()
+    query = (query or '').strip().lower()
+    scored = []
+    for row in TABLES.sql('itemList'):
+        item_slot = to_int(row.get('itemType'), -1)
+        if slot >= 0 and item_slot != slot:
+            continue
+        item_id = to_int(row.get('itemID'), -1)
+        if item_id < 0:
+            continue
+        name = strings.get(to_int(row.get('nameID'), -1)) or ('Item %d' % item_id)
+        rank = _score(name, str(item_id), query)
+        if rank is None:
+            continue
+        grade = to_int(row.get('itemGrade'), 0)
+        # Best grade first inside a rank: browsing a slot with no query should
+        # offer real gear, not the placeholder rows named "123".
+        scored.append((rank, -grade, name.lower(), item_id, {
+            'id': item_id, 'name': name, 'slot': item_slot, 'grade': grade}))
+    scored.sort(key=lambda r: r[:4])
+    return [r[4] for r in scored[:limit]]
 
 
 def _clean_arena_bots(bots):
@@ -304,7 +364,7 @@ class Handler(BaseHTTPRequestHandler):
         # reset like everything else); this endpoint is the read side, which
         # needs the game tables to turn ids into names and a team into a rating.
         if path == '/arena' and method == 'GET':
-            from ..game import arena
+            from ..game import arena, artifacts
             units = _unit_names()
             shipped = arena._shipped_bots()
             custom = arena._custom_bots()
@@ -316,7 +376,12 @@ class Handler(BaseHTTPRequestHandler):
                     'power': arena.bot_power(bot), 'custom': bot['custom'],
                     'units': [{'id': u['id'], 'name': units.get(u['id'], str(u['id'])),
                                'level': u['level'], 'tier': u['tier'],
-                               'grade': u['grade'], 'rareness': u['rareness']}
+                               'grade': u['grade'], 'rareness': u['rareness'],
+                               'awaken': len(u.get('awaken') or []),
+                               'gear': len([e for e in (u.get('equip') or [])
+                                            if to_int(e, -1) > 0]),
+                               'artifacts': list(u.get('artifacts')
+                                                 or u.get('relics') or [])}
                               for u in bot['units']],
                 }
 
@@ -352,9 +417,20 @@ class Handler(BaseHTTPRequestHandler):
                     'tier_caps': {str(t): lv for t, lv
                                   in sorted(arena.tier_level_caps().items())
                                   if t >= 1},
-                    'heroes': {str(uid): {'name': name, 'rareness': rare}
+                    'heroes': {str(uid): {'name': name, 'rareness': rare,
+                                          'nodes': len(arena.awaken_nodes(uid))}
                                for uid, (name, rare)
                                in sorted(arena.playable_heroes().items())},
+                    # Wearable Artifacts, best grade first.  216 rows is small
+                    # enough to send whole; gear is 2,526 and goes through
+                    # /items instead.  These are Artifacts, not the Scene Cards
+                    # the UI calls Relics.
+                    'artifacts': [{'id': rid, 'grade': artifacts.grade_of(rid),
+                                'slot': artifacts.slot_of(rid),
+                                'name': TABLES.resource_name(8, rid)}
+                               for rid in artifacts.catalogue()],
+                    'gear_slots': {'1': 'Weapon', '2': 'Armor',
+                                   '3': 'Gloves', '4': 'Boots'},
                 },
                 'tiers': [{'tier': to_int(t.get('Tier'), 0),
                            'name': arena.tier_name(to_int(t.get('PointMin'), 0)),
@@ -375,6 +451,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {
                 'resources': _catalogue((query.get('q') or [''])[0],
                                         int((query.get('limit') or ['200'])[0]))})
+
+        # Gear for the arena team builder.  Searched rather than sent whole --
+        # itemList has 2,526 rows, against 216 relics which do go in /arena.
+        if path == '/items' and method == 'GET':
+            return self._send(200, {
+                'items': _gear((query.get('q') or [''])[0],
+                               to_int((query.get('slot') or ['-1'])[0], -1),
+                               int((query.get('limit') or ['100'])[0]))})
 
         # ---- accounts ----
         if path == '/accounts' and method == 'GET':

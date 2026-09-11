@@ -71,6 +71,26 @@ DEFAULTS = {
         # Start at the rank-30 EXP threshold so hero levelling is not blocked
         # out of the gate.  0 starts at rank 1.
         'starting_exp': -1,            # -1 = keep the built-in default
+        # How many of each hero's own Memory (ResourceType 16, keyed by the
+        # hero) a new account gets.  Star-up charges these from 3 stars on --
+        # 80 + 160 + 240 + 320 takes one hero from 3 stars to 6 -- and the only
+        # other source is an SS-or-better duplicate summon, so 0 means most
+        # heroes can never be starred up at all.
+        'starting_memories': 1000,
+        # How many Artifacts a new account gets.  Grade 3 and 4, so there is
+        # something to equip and room to level.  NOTE these are Artifacts
+        # (ResourceType 8), not the Scene Cards the UI calls Relics -- those
+        # are crafted at the Forge.  The old key `starting_relics` is still
+        # read as a fallback so an existing settings.json keeps working.
+        'starting_artifacts': 8,
+    },
+    'forge': {
+        # How long a Relic craft takes, in seconds.  This is the one Forge
+        # number that is NOT in the client's tables -- neither
+        # sceneCardCreateCost nor sceneCardCreateSlot carries a duration, so it
+        # was a server-side policy value on the real service and it is one
+        # here.  0 means the craft can be collected straight away.
+        'craft_seconds': 0,
     },
     'arena': {
         # Bump this to wipe the ladder and start a new season.
