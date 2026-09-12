@@ -15,6 +15,7 @@ currency in the game.
 from datetime import datetime
 
 from ..protocol.dto import TYPES
+from .enums import ResourceType
 
 
 def _dt(iso):
@@ -64,8 +65,31 @@ def user_info(player):
         RepresentProfile=player.d['represent_profile'],
         AccountID=player.account_id,
         SkinID=player.d['skin_id'],
+        WallPaperID=player.d.get('wallpaper_id', 0),
         frameInfo=TYPES['NGFrameInfo'](frameID=player.d.get('frame_id', 0)),
     )
+
+
+def frame_infos(player):
+    """NGFrameInfo entries for NGLogInAck01.vecUserAllFrames -- the "Change
+    Frame" picker's candidate list. NMUserInfo.GetFrameList reads this same
+    list back from the login snapshot; without at least one entry it can
+    never resolve the account's *current* selection either, which is why an
+    empty list turned even the Release button into Error_MyInfoNotReleaseFrame
+    (MyInfoChangeFrame.OnClickRelease bails out first if it can't find one).
+    FrameID 0 is the wire's "no frame" sentinel -- OnClickRelease sends it
+    unconditionally -- so it is always present here, unlike the 26 real
+    frames (ResourceTable's ResourceID 170), which are earned (Arena rank,
+    Tower clears, events) and only listed once owned. seasonType 0 marks a
+    frame as not season-limited; GetFrameList only runs the
+    GetNGSeasonValue/endSeason check for seasonType >= 1, so plain ownership
+    is enough for everything granted here.
+    """
+    out = [TYPES['NGFrameInfo'](frameID=0, seasonType=0, endSeason=0)]
+    for t1, t2, t3, v in player.resource_items():
+        if t1 == ResourceType.Frame and v > 0:
+            out.append(TYPES['NGFrameInfo'](frameID=t2, seasonType=0, endSeason=0))
+    return out
 
 
 def equip_info(u):

@@ -5,7 +5,7 @@ from ..net import handler
 from ..protocol.dto import TYPES
 from ..game import state
 from ..game.errors import Err
-from ..game.enums import NMError
+from ..game.enums import NMError, ResourceType
 
 log = logging.getLogger('hc.misc')
 
@@ -30,6 +30,82 @@ async def change_nickname(s, a):
     p.save()
     log.info('account %d renamed to %r', p.account_id, name)
     await s.send(40122, Err.OK, state.user_info(p), state.resource_sync(p))
+
+
+@handler(30111)
+async def change_represent_hero(s, a):
+    """Change Main Hero. `RepresentProfileID` is a `UnitID` (the hero
+    definition, from the `profileInfo`/`representProfile` tables), not an
+    owned unit's instance uid -- `NMUnit.GetProfileList` builds the picker's
+    candidates from `profileInfo` and only keeps the ones where
+    GetResourceLongValue(ResourceType.Profile, UnitID, -1) >= 1, so that is
+    the same thing to check here (see `Player.add_unit`, which now grants
+    that resource). Refuse one the account hasn't unlocked
+    (`Error_MyInfoChangeProfileNotSelect`) or one already in use
+    (`Error_MyInfoChangeProfileSameProfile`); either way the client has a
+    named popup for it, so there is no reason to invent a generic failure.
+    """
+    p = s.player
+    unit_id = int(a['RepresentProfileID'])
+    if unit_id == p.d['represent_profile']:
+        await s.send(40123, NMError.Error_MyInfoChangeProfileSameProfile, state.user_info(p))
+        return
+    if p.get_resource(ResourceType.Profile, unit_id, -1) < 1:
+        await s.send(40123, NMError.Error_MyInfoChangeProfileNotSelect, state.user_info(p))
+        return
+    p.d['represent_profile'] = unit_id
+    p.save()
+    log.info('account %d set represented hero to unit %d', p.account_id, unit_id)
+    await s.send(40123, Err.OK, state.user_info(p))
+
+
+@handler(30283)
+async def change_wallpaper(s, a):
+    """Change the Background. Unlike the hero picker, `MyInfoChangeBackImage`
+    builds its candidates from `GetResourceInfoListByType1(ResourceType.
+    WallPaper=158)` -- ownership is a plain resource, not a per-hero reward
+    table, and it only ever gets granted by a purchase (the Costume Shop's
+    `BuyShopGoodsReq` pays some goods out in WallPaper -- see
+    `hc/handlers/shop.py`), which is also why this screen carries its own
+    `OnBuy()`. So an empty list before buying anything is correct, not a bug.
+    There is no client error string dedicated to this screen, so an unowned
+    id gets the generic `Err.NOT_FOUND`.
+    """
+    p = s.player
+    wallpaper_id = int(a['wallPaperID'])
+    if p.get_resource(ResourceType.WallPaper, wallpaper_id, -1) < 1:
+        await s.send(40305, Err.NOT_FOUND, state.user_info(p))
+        return
+    p.d['wallpaper_id'] = wallpaper_id
+    p.save()
+    log.info('account %d changed background to wallpaper %d', p.account_id, wallpaper_id)
+    await s.send(40305, Err.OK, state.user_info(p))
+
+
+@handler(30305)
+async def change_frame(s, a):
+    """Change Frame. The picker (`NMUserInfo.GetFrameList`) reads its
+    candidates from the account's own `vecUserAllFrames`, sent once at login
+    (see `state.frame_infos`) -- nothing was ever sent there before, so the
+    list was always empty and even the Release button (which just sends
+    FrameID 0) bailed out client-side with `Error_MyInfoNotReleaseFrame`
+    before a packet was ever written. FrameID 0 is that "no frame" sentinel
+    and always allowed; the 26 real frames (ResourceTable's ResourceID 170)
+    are earned (Arena rank, Tower clears, events), so anything else needs the
+    matching `ResourceType.Frame` resource.
+    """
+    p = s.player
+    frame_id = int(a['FrameID'])
+    if frame_id == p.d.get('frame_id', 0):
+        await s.send(40327, NMError.Error_MyInfoChangeFrameSameProfile, state.user_info(p))
+        return
+    if frame_id != 0 and p.get_resource(ResourceType.Frame, frame_id, -1) < 1:
+        await s.send(40327, NMError.Error_MyInfoChangeFrameNotSelect, state.user_info(p))
+        return
+    p.d['frame_id'] = frame_id
+    p.save()
+    log.info('account %d changed frame to %d', p.account_id, frame_id)
+    await s.send(40327, Err.OK, state.user_info(p))
 
 
 @handler(30012)
