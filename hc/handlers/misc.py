@@ -5,8 +5,31 @@ from ..net import handler
 from ..protocol.dto import TYPES
 from ..game import state
 from ..game.errors import Err
+from ..game.enums import NMError
 
 log = logging.getLogger('hc.misc')
+
+
+@handler(30110)
+async def change_nickname(s, a):
+    """Rename. `MyInfoChangeNickname` has both a paid button (`costValue`, a
+    ResourceReward) and a free one (`btnFreeChangeName`), but both send this
+    same packet with nothing to tell them apart, and no table anywhere ships a
+    price for a rename -- so charging would be inventing an economy rule, not
+    reading one. Nothing is charged; only the length is checked, with the
+    client's own `Error_MyInfoChangeNickNameLength` (1116) so the popup reads
+    right instead of the request just silently failing.
+    """
+    p = s.player
+    name = (a['_ChangeName'] or '').strip()
+    if not name:
+        await s.send(40122, NMError.Error_MyInfoChangeNickNameLength,
+                     state.user_info(p), state.resource_sync(p))
+        return
+    p.d['nickname'] = name
+    p.save()
+    log.info('account %d renamed to %r', p.account_id, name)
+    await s.send(40122, Err.OK, state.user_info(p), state.resource_sync(p))
 
 
 @handler(30012)
