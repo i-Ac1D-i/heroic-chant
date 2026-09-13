@@ -4,7 +4,7 @@ import logging
 from ..net import handler
 from ..data.tables import TABLES, to_int
 from ..protocol.dto import TYPES
-from ..game import state, rewards, scenecards
+from ..game import state, rewards, scenecards, missions
 from ..game.errors import Err
 
 log = logging.getLogger('hc.units')
@@ -49,6 +49,7 @@ async def unit_level_up(s, a):
         await s.send(40006, Err.NOT_ENOUGH, state.resource_sync(p))
         return
     u['level'] = target
+    missions.record_unit_level(p, u)     # Guide Mission: "reach level N with X"
     p.save()
     await s.send(40006, Err.OK, state.resource_sync(p, vecChangeUnitInfo=state.unit_infos(p, [u])))
 
@@ -109,6 +110,7 @@ async def unit_grade_up(s, a):
         return
 
     u['grade'] = grade + 1
+    missions.record_unit_grade(p, u)     # Guide: "achieve N stars with X"
     # Fodder units named by the client are consumed.
     removed = []
     for uid in list(a.get('vecMaterialUnitID') or []):
@@ -164,6 +166,7 @@ async def unit_awaken(s, a):
             await s.send(40009, Err.NOT_ENOUGH, state.resource_sync(p))
             return
         opened.append(parts_id)
+        missions.record_awaken_node(p, parts_id)   # Guide: "open awakening slots"
         log.info('unit %d awakened node %d (paid %s)', u['uid'], parts_id, costs)
 
         # Some nodes hand over the hero's own Relic.  `unitAwakenBonusReward`

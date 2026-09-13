@@ -48,6 +48,12 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CLIENT_FILES = os.path.join(HERE, '..', '..', 'files', 'ngelgames')
+# Modified client files live here, mirroring the paths below ngelgames/, and are
+# served in preference to the originals.  Beside server/ on both the PC and the
+# phone (~/heroic-chant/client-overrides), so the same layout works for either.
+DEFAULT_OVERLAY = os.path.join(HERE, '..', '..', 'client-overrides')
+# Inside the overlay: {"script/unit": 4200600147, ...} -- see download_info.
+OVERLAY_CRC_FILE = 'crc.json'
 
 # Hostnames that should resolve to us.
 MATCH = ('ngelgames.net', 'ngelgames.co.kr', 'ngelgames.com',
@@ -66,12 +72,21 @@ class Assets(object):
     On a phone the zip form matters: the game is going to download its own
     copy of everything anyway, so unpacking our copy first would cost a second
     2 GB for no reason.  Reading straight out of the archive avoids that.
+
+    An optional **overlay** directory sits on top.  A file found there wins
+    over the original, which is how modified bundles are served without
+    rewriting a 2 GB archive, and without touching the originals at all --
+    deleting the overlay file is the whole of reverting it.
+
+    The overlay directory does not have to exist yet: every lookup checks the
+    disk, so a tool that creates it later is picked up without a restart.
     """
 
-    def __init__(self, root):
+    def __init__(self, root, overlay=None):
         self.root = root
         self.zip = None
         self.prefix = ''
+        self.overlay = os.path.abspath(overlay) if overlay else None
         if os.path.isfile(root) and root.lower().endswith('.zip'):
             self.zip = zipfile.ZipFile(root)
             names = self.zip.namelist()
@@ -118,9 +133,38 @@ class Assets(object):
         if self.prefix:
             yield '%s/%s' % (self.prefix, rel)
 
+    def overlay_path(self, rel):
+        """The overlay copy of `rel`, if there is one."""
+        if not self.overlay:
+            return None
+        rel = rel.replace(os.sep, '/').strip('/')
+        full = os.path.join(self.overlay, *rel.split('/'))
+        return full if os.path.isfile(full) else None
+
+    def is_overlay(self, key):
+        return bool(self.overlay) and os.path.isabs(str(key)) and \
+            os.path.abspath(key).startswith(self.overlay + os.sep)
+
+    def overlay_crcs(self):
+        """{bundle path: Unity CRC} for the overlay.  Read fresh each time, so a
+        tool writing new bundles does not need the boot server restarted."""
+        path = self.overlay_path(OVERLAY_CRC_FILE)
+        if path is None:
+            return {}
+        try:
+            with open(path, encoding='utf-8') as fh:
+                data = json.load(fh)
+            return {str(k).strip('/'): int(v) for k, v in data.items()}
+        except (OSError, ValueError, TypeError, AttributeError):
+            log('  overlay %s is unreadable -- ignoring it', OVERLAY_CRC_FILE)
+            return {}
+
     def find(self, *parts):
         """Locate a file below the client root.  Returns a key, or None."""
         rel = '/'.join(str(p) for p in parts if p)
+        hit = self.overlay_path(rel)
+        if hit is not None:
+            return hit
         for cand in self._candidates(rel):
             if self.zip is not None:
                 hit = self._names.get(cand.lower())
@@ -132,12 +176,16 @@ class Assets(object):
                     return full
         return None
 
+    def _in_zip(self, key):
+        # Archive member names are never absolute; overlay keys always are.
+        return self.zip is not None and not os.path.isabs(str(key))
+
     def size(self, key):
-        return (self.zip.getinfo(key).file_size if self.zip is not None
+        return (self.zip.getinfo(key).file_size if self._in_zip(key)
                 else os.path.getsize(key))
 
     def open(self, key):
-        return self.zip.open(key) if self.zip is not None else open(key, 'rb')
+        return self.zip.open(key) if self._in_zip(key) else open(key, 'rb')
 
     def read_json(self, name):
         key = self.find(name)
@@ -178,45 +226,66 @@ def patchinfo(version):
 
 
 def download_info(name):
-    """A patch manifest with the integrity checks relaxed.
+    """The patch manifest, with each file's `crc` set to what we really serve.
 
-    Every entry carries a `crc` that Unity checks after downloading the bundle,
-    and it is *not* a CRC32 of the file on disk -- it is computed over the
-    decompressed bundle internally, so we cannot recalculate it for a bundle
-    that has been modified.  Which matters, because tools/patch_units.py exists
-    precisely to modify one: serving a patched `script/unit` against the
-    shipped manifest gets
+    Every entry carries a `crc` that Unity checks when it loads the bundle.
+    It is a CRC32 over the bundle's *uncompressed* node data, concatenated in
+    directory order -- not a CRC of the file on disk.  (Verified against every
+    shipped value tried, single- and multi-node.)  Serving a modified
+    `script/unit` against the shipped value gets
 
         CRC Mismatch. Provided 6ca27b35, calculated fa601253 from data.
         Will not load AssetBundle 'unit'
 
     and then a NullReferenceException in NMUnit.TextDecrypt, because the unit
-    tables never loaded.  On screen that looks like the download wedging at
-    "CollectionBook 85/227".
+    tables never loaded -- on screen, the download wedging at "CollectionBook
+    85/227".  `fa601253` is exactly what the formula above gives for that file.
 
-    Unity skips the check when the crc is 0, which is what we want anyway: the
-    bytes come off local disk over loopback, so there is nothing to guard
-    against.  We also correct `mb` to whatever we are really serving, since a
-    patched bundle is rarely the same size as the original.
+    The crc also decides *whether* to download: `NMPatcher.CheckCompareFile`
+    @0x1F53120 re-fetches a file when `new.crc != old.crc`, and ignores size.
+
+    So:
+
+    * **Original files get crc 0.**  Unity skips the check for 0, and the bytes
+      come off local disk anyway.  It is also what every install made through
+      this server already has, so none of them re-downloads 862 MB.
+    * **Overlay files listed in the overlay's crc.json get their real crc**
+      (tools like server/skill-builder write it).  The phone sees the value
+      change, downloads just that file, and Unity's check passes because the
+      value is true.  An overlay file *without* a crc.json entry falls back
+      to 0 -- it is served, but a phone that already has the file keeps its
+      old copy.
+
+    `mb` is corrected to the size really served, since a modified bundle is
+    rarely the original size.
     """
     obj = ASSETS.read_json(name)
     if obj is None:
         return None
-    zeroed = resized = 0
+    crcs = ASSETS.overlay_crcs()
+    zeroed = resized = overridden = 0
     for entry in obj.get('patchlist', []):
-        if entry.get('crc'):
-            entry['crc'] = 0
-            zeroed += 1
         path = entry.get('path')
-        if path:
-            key = ASSETS.find('AssetBundle', path) or ASSETS.find(path)
-            if key is not None:
-                actual = ASSETS.size(key)
-                if entry.get('mb') != actual:
-                    entry['mb'] = actual
-                    resized += 1
-    log('  HTTP %s -> %d entries, %d crc cleared, %d resized',
-        name, len(obj.get('patchlist', [])), zeroed, resized)
+        key = (ASSETS.find('AssetBundle', path) or ASSETS.find(path)) if path else None
+        overlay = key is not None and ASSETS.is_overlay(key)
+        real = crcs.get(str(path).strip('/')) if overlay else None
+        if real is not None:
+            entry['crc'] = real
+            overridden += 1
+        else:
+            if overlay:
+                log('  overlay %s has no crc in %s: a phone that already has '
+                    'it will not download the new copy', path, OVERLAY_CRC_FILE)
+            if entry.get('crc'):
+                entry['crc'] = 0
+                zeroed += 1
+        if key is not None:
+            actual = ASSETS.size(key)
+            if entry.get('mb') != actual:
+                entry['mb'] = actual
+                resized += 1
+    log('  HTTP %s -> %d entries, %d crc cleared, %d from overlay, %d resized',
+        name, len(obj.get('patchlist', [])), zeroed, overridden, resized)
     return obj
 
 
@@ -402,13 +471,22 @@ def main():
                     default=os.environ.get('HC_CLIENT_FILES', DEFAULT_CLIENT_FILES),
                     help='the client files/ngelgames directory, or a .zip of it '
                          '(also settable with HC_CLIENT_FILES)')
+    ap.add_argument('--overlay',
+                    default=os.environ.get('HC_CLIENT_OVERLAY', DEFAULT_OVERLAY),
+                    help='a directory of modified client files, served in '
+                         'preference to the originals (also HC_CLIENT_OVERLAY)')
     ap.add_argument('-q', '--quiet', action='store_true')
     args = ap.parse_args()
 
     HOST, PORT, VERBOSE = args.host, args.port, not args.quiet
     HTTP_PORT = args.http_port
-    ASSETS = Assets(os.path.expanduser(args.client_files))
+    ASSETS = Assets(os.path.expanduser(args.client_files),
+                    overlay=os.path.expanduser(args.overlay))
     log('assets  %s%s', ASSETS.root, ' (zip)' if ASSETS.zip is not None else '')
+    if ASSETS.overlay and os.path.isdir(ASSETS.overlay):
+        log('overlay %s (%d bundle crc(s))', ASSETS.overlay, len(ASSETS.overlay_crcs()))
+    elif ASSETS.overlay:
+        log('overlay %s (empty for now; picked up when it appears)', ASSETS.overlay)
     if ASSETS.prefix:
         log('        rooted at "%s" inside the archive', ASSETS.prefix)
 

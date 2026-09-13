@@ -125,9 +125,7 @@ async def guild_donation(s, a):
                      state.resource_sync(p))
         return
 
-    today = datetime.utcnow().date().isoformat()
-    if g.get('donation_day') != today:
-        g['donation_day'], g['donation_count'] = today, 0
+    guild.roll_donation_day(g)
     if g['donation_count'] >= guild.donation_cap():
         log.info('donation cap reached (%d/day)', guild.donation_cap())
         await s.send(40106, Err.INVALID, guild.guild_dto(p), guild.guild_member_dto(p),
@@ -142,6 +140,7 @@ async def guild_donation(s, a):
 
     reward = guild.donation_reward()
     g['donation_count'] += 1
+    g['last_donation'] = datetime.utcnow().isoformat(timespec='seconds')
     g['donation'] = int(g.get('donation', 0)) + cost
     g['contribution'] = int(g.get('contribution', 0)) + reward
     g['member']['donation'] = int(g['member'].get('donation', 0)) + cost
@@ -281,6 +280,45 @@ async def check_guild_raid_info(s, a):
 async def check_guild_wars_info(s, a):
     await s.send(40274, Err.OK, guild.guild_dto(s.player), TYPES['NGGuildBase'](),
                  state.resource_sync(s.player), [], TYPES['NGGuildWarsPlay'](), False)
+
+
+@handler(30250)
+async def guild_wars_defense_party_change(s, a):
+    """Save the Guild War defence team.
+
+    Unhandled before, which is two bugs in one: the team was never saved, and
+    the client sits waiting for GuildWarsDefensePartyChangeAck (40273) with no
+    way out of the screen, so the only escape was restarting the game.
+
+    ContentsType has no Guild War member -- the enum stops at GuildDungeon (12)
+    for guild content -- so there is no party SlotType to pick.  The team lives
+    in NGGuildMember.vecGuildWarParty instead, so it is stored exactly as the
+    client sent it and replayed there, with the heroes in vecGuildWarUnit.
+    """
+    p = s.player
+    rows = list(a.get('_vecChangePartyInfo') or [])
+    g = p.d.get('guild')
+    if not g:
+        log.info('guild war team change with no guild')
+        await s.send(40273, Err.NOT_FOUND, rows)
+        return
+
+    owned = {int(u['uid']) for u in p.d.get('units', [])}
+    kept, dropped = [], 0
+    for r in rows:
+        uid = int(getattr(r, 'UnitUID', 0) or 0)
+        if uid and uid not in owned:
+            dropped += 1
+            continue
+        kept.append({'slot_type': int(getattr(r, 'SlotType', 0)),
+                     'slot_index': int(getattr(r, 'SlotIndex', 0)),
+                     'unit_uid': uid,
+                     'skill_on_off': int(getattr(r, 'SkillOnOff', 0))})
+    g['war_party'] = kept
+    p.save()
+    log.info('guild war defence team saved: %d hero(es)%s', len(kept),
+             ', %d unknown dropped' % dropped if dropped else '')
+    await s.send(40273, Err.OK, rows)
 
 
 @handler(30363)

@@ -6,7 +6,7 @@ round wastes a session:
 
 | UI says   | protocol/tables say | ResourceType | EItemType slots |
 |-----------|---------------------|--------------|-----------------|
-| **Relic** | SceneCard           | 42           | 9, 10, 11       |
+| **Relic** | SceneCard           | 42           | 9, 10           |
 | Artifact  | Artifact            | 8            | 7 (8 unused)    |
 
 Evidence, not inference:
@@ -22,7 +22,7 @@ Evidence, not inference:
   calls `NMUnit.GetUnitAwakenBonusReward(unitID, partsInfoID)` and renders the
   result -- and every row of `unitAwakenBonusReward` pays ResourceType 42.
 * `sceneCardInfo.itemType` is 9 for all 144 cards, i.e.
-  `EItemType.SceneCardSlot1`; the three equip slots are 9, 10 and 11.
+  `EItemType.SceneCardSlot1`.  A hero has two relic slots, 9 and 10.
 
 So `hc/game/artifacts.py` is the *Artifact* system. This file is Relics.
 
@@ -56,9 +56,16 @@ from ..data.tables import TABLES, to_int
 from .enums import ResourceType
 from ..settings import SETTINGS
 
-# EItemType, @dump.cs:773764.
+# EItemType, @dump.cs:773764.  EItemType defines three scene-card slots, but a
+# hero only has two: UnitDetailRelicInfo.UpdateUI @0x1E9D698 checks exactly 9
+# and 10, and itemSlotOpenState only gates those two.
 SLOT_1, SLOT_2, SLOT_3 = 9, 10, 11
-SLOTS = (SLOT_1, SLOT_2, SLOT_3)
+SLOTS = (SLOT_1, SLOT_2)
+
+# itemSlotOpenState: slot 9 opens with awakening node 10002, slot 10 with
+# 10004.  NMUnit.CheckItemOpenSlot @0x149A69C looks for an NGAwakenInfo with
+# AwakenID == openValue and State == 1 on the unit.
+SLOT_OPEN_NODE = {SLOT_1: 10002, SLOT_2: 10004}
 
 SCENE_CARD = ResourceType.SceneCard          # 42
 CRAFT_KIT = ResourceType.ArtifactMaterial    # 127, "Craft KIT"
@@ -101,6 +108,14 @@ def _cached(name, build):
     if got is None:
         got = globals()[name] = build()
     return got
+
+
+def slot_open(unit, slot):
+    """Is this hero's relic slot unlocked?  Mirrors NMUnit.CheckItemOpenSlot."""
+    node = SLOT_OPEN_NODE.get(int(slot))
+    if node is None:
+        return False
+    return node in [int(n) for n in (unit.get('awaken') or [])]
 
 
 def fixed_reward_cards():
@@ -240,7 +255,12 @@ def info(r):
     return TYPES['NGSceneCard'](
         UID=int(r['uid']), ID=int(r['id']), EXP=int(r.get('exp', 0)),
         SkillGrade=int(r.get('skill', 1)),
-        EquipUnitUID=int(r.get('equip', 0) or 0),
+        # -1, not 0, means "nobody".  The relic picker's own filter,
+        # PopupboxSceneCardList.<UpdateList>b__29_6 @0x16FD720, is
+        # `EquipUnitUID == -1`; sent 0, every relic reads as already worn and
+        # the picker shows none of them -- which is exactly "relics are in the
+        # inventory but never show up when equipping a hero".
+        EquipUnitUID=int(r.get('equip', 0) or 0) or -1,
         CardType=card_type(r['id']),
         LockEnable=int(r.get('lock', 0)))
 

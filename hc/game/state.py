@@ -203,4 +203,14 @@ def resource_sync(player, only=None, **extra):
     cols = player.take_dirty_collections()
     if cols and 'vecAddCollectionInfo' not in extra:
         extra['vecAddCollectionInfo'] = collection_infos(player, cols)
+    # Mail sent from the dashboard while this account is online.  It cannot be
+    # written into the save -- the session holds the player in memory and
+    # would overwrite it -- so it waits in hc.game.mail's outbox and rides out
+    # on whatever Ack comes next.  The memory check is cheap; disk is never
+    # touched unless there is something to deliver.
+    from . import mail
+    if mail.has_pending(player.account_id):
+        arrived = mail.drain(player)
+        if arrived:
+            extra['vecAddPost'] = list(extra.get('vecAddPost') or []) +                 [mail.info(post) for post in arrived]
     return check_info(vecAddResourceInfo=resource_infos(player, only), **extra)

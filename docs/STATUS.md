@@ -960,3 +960,275 @@ could not show the session being asked about. The unhandled packets were found
 by diffing the registered handler list against the 859-packet spec instead,
 which is exact. If a game server log from a later run turns up, it is worth a
 second pass for packets nobody has hit yet.
+
+## Eleventh pass: guilds, exclusive gear, missions, and relics that equip
+
+Confirmed working in game before this pass: Awakening Passive Mastery, rank-up
+to SSS, hero Q's star-up, Guild War access, and the 1v1 Arena. Six more reports
+came back, and every one had a cause that could be read straight off the
+client. No game-server log from these sessions was available -- the user plays
+on the phone -- so each was found by diffing handlers against the spec and then
+reading the client.
+
+### Relics would not equip: `EquipUnitUID` must be -1, not 0
+
+The relic picker's own filter is `EquipUnitUID == -1`
+(`PopupboxSceneCardList.<UpdateList>b__29_6` @0x16FD720 is a single
+`cmn x8, #1`). The server sent 0 for an unequipped relic, so every relic read as
+already worn and the picker showed none of them. The inventory does not filter,
+which is exactly why relics *appeared* but could not be equipped. Artifacts now
+send -1 too; their picker does not filter on it, so that half is consistency,
+not a confirmed bug. **-1 means "none" throughout this client -- the same trap
+as `Type3int64` keys.**
+
+Also read off the client while there: a hero has **two** relic slots, 9 and 10
+(`UnitDetailRelicInfo.UpdateUI` @0x1E9D698), not three. They are locked until
+awakening node **10002** (slot 9) or **10004** (slot 10) is open --
+`itemSlotOpenState`, checked by `NMUnit.CheckItemOpenSlot` @0x149A69C, whose
+predicate is `AwakenID == openValue && State == 1`. The server now refuses the
+same thing.
+
+### The arena daily reward: the mission claim was a stub
+
+`GetMissionRewardReq` (30029) marked missions done and **paid nothing**, and no
+fight advanced any mission counter. The one daily 1v1 arena mission is 104,
+"Play 1vs1 Arena 3 times".
+
+`MissionInfo.ClearMission` @0x2278844 switches on ClearType through a jump
+table at 0x3C745B4 (indexed ClearType - 1). **`MissionClearType` and
+`CollectionType` are different enums and the numbers do not line up**:
+mission clear type 12 (ContentsPlayCount) reads **CollectionType 13**, via
+`Type3int64.GetKey(13, ClearVal_2)`. Progress is that counter minus the
+mission's `StartCollectionValue`.
+
+New `hc/game/missions.py`: arena fights bump ContentsPlayCount and
+ContentsClearCount for contents 6; daily and weekly missions go out at login
+with a per-period baseline and a received flag; claiming validates, pays from
+`missionReward`, and sends `vecChangeMissionInfo`. Using `Season` as the period
+index is INFERRED, and only clear types 12 and 13 are validated server-side --
+other claims are trusted because the client only enables Claim after its own
+check passes. Both are written up in the module.
+
+### Guild War team could not be saved, and trapped the player
+
+`GuildWarsDefensePartyChangeReq` (30250) was unhandled, so the client waited
+forever for its Ack (40273) -- no save, and no way off the screen. ContentsType
+has no Guild War member, so the team is stored exactly as sent and replayed in
+`NGGuildMember.vecGuildWarParty` / `vecGuildWarUnit`.
+
+### Guild buffs stopped upgrading
+
+The buff board takes a buff's level from the guild's `vecBuff`
+(`GuildBuffScrollViewItem.Init` @0x19C4D28 -> `GetGuildTopLevelBuff`, falling
+back to level 0). The server dropped a buff from `vecBuff` once its timer ran
+out, so after six hours the board showed level 0 while the save held the real
+level. Unlocked buffs now always go out; an expired one just shows as expired.
+
+### The daily guild donation never reset
+
+The day only rolled over inside the donate handler, but the client greys out
+Donate from `NGGuildMember.DonationCount` -- which still carried yesterday's
+full count, so the request was never sent and the reset never ran. The day now
+rolls wherever the count goes out. `tmLastDonation` also used to be "now"
+unconditionally.
+
+### Exclusive equipment could not be upgraded
+
+`ExclusiveLookItemGradeUpReq` (30216) and `EquipExclusiveLookItemGradeUpReq`
+(30217) were unhandled. Exclusive gear is `itemList` itemType 15, and
+`ExclusiveLookGradeUp` has two modes:
+
+* **Normal / Enhance** -- the click @0x18D6854 runs the same
+  `NMUnit.CheckUpgradeItem` @0x1495B78 gear uses: other gear as material
+  (`req_itemID` x `req_itemCount`), gold, diamond, and `ResourceType_1` x
+  `ResourceVal_1` (some chains cost EventCoin). A per-mille `SuccessRatio`
+  roll; failure still spends the materials.
+* **Fix / Fusion** -- the click @0x18D776C counts copies of *this* item owned,
+  **plus one if it is worn**, against `ItemInfo.FusionCount` (+0xB8), raising
+  error 1227 if short. No roll and no gold.
+
+### Tests
+
+New `tools/test_guild_missions.py`, 42 checks. `tools/test_progression.py` is
+now 113, with the -1 value and the relic slot lock covered.
+
+## Twelfth pass: mail, with live delivery from the dashboard, and the Guide Mission
+
+### Mail
+
+`PostSendReq`, `GetPostRewardReq`, `GetPostRewardTypeReq` and `DelPostReq`
+(30018-30021) were all unhandled, and nothing ever filled the mailbox.
+
+**The real problem was delivery, not the mailbox.** A logged-in account's
+`Player` lives in its session's memory and every handler ends in `p.save()`, so
+anything the dashboard wrote into that account's save was overwritten on the
+session's next save. That is why a dashboard gift needed the game closed and
+reopened. New `hc/game/mail.py` never touches a save from the dashboard side:
+`send` drops a post into an outbox (memory, mirrored to
+`accounts/outbox/<id>.json` for restarts) and the owning session drains it --
+at login, and inside `state.resource_sync`, which nearly every Ack goes through.
+There is no server-initiated mail packet; posts reach the client only as
+`vecAddPost` in reply to something, so delivery is on the player's next action.
+
+Read off the client: `PostType` is System 0 / Event 1 / User 2, with -1 (All)
+and -2 (Received) as mailbox filter tabs -- so a claimed post **stays** in the
+mailbox marked `ReceivedReward`, and only deleting removes it.
+`PostScrollViewItem.Init` @0x163A8EC renders `Subjects` through `int.TryParse`:
+an all-digit subject is shown as that client string id, anything else as text,
+and unlike `NGServerGroupInfo.ServerName` it cannot throw.
+
+The dashboard's account editor has a "Send mail" card (subject, message,
+expiry, searchable attachments, and "send to every account"), backed by
+`POST /api/accounts/<id>/mail`, `POST /api/mail` and `GET /api/accounts/<id>/mail`.
+The wallet editor now says what was always true: it is only reliable while the
+account is offline.
+
+### The Guide Mission
+
+Four chapters, 147 missions, all in the data (`GuideChapterInfo`,
+`GuideMissionListInfo`, and `missionList` rows with `MissionType.GuideMission`
+= 21). New `hc/game/guide.py` and `GetGuideMissionFinalRewardReq` (30307).
+
+* Chapters go out in `NGLogInAck02.vecUserGuideMissionChapter`;
+  `GuideChapterBtn.IsChapterFinalMissionComplete` @0x19C2BC4 is just
+  `RewardGained == 1`.
+* Every guide mission needs an `NGMissionInfo` -- the chapter screen calls
+  `GetMission` for each, and `NMResource.CheckCompleteLastMission` @0x19FFD24,
+  the final-reward gate, fails on the first one missing or unclaimed. So the
+  final reward needs every mission in the chapter claimed, on both sides.
+* **Guide missions are lifetime goals: their baseline is 0.** Daily and weekly
+  missions start from the counter's value at the period start; "clear stage
+  1-3" must count a stage cleared last month.
+
+**Mission scoring, decoded rather than guessed.** `MissionInfo.ClearMission`
+@0x2278844 is a jump table at 0x3C745B4. Each case builds a `Type3int64` key
+and falls into one of two shared tails: @0x2279394 compares
+`value - start >= ClearVal_1`, @0x22794C0 compares `value - start >= ClearVal_2`.
+
+| ClearType | reads | key | target |
+|---|---|---|---|
+| 10 DimensionGachaOpenCount | sum of CollectionType 9 | any banner | ClearVal_1 |
+| 12 ContentsPlayCount | 13 | ClearVal_2 | ClearVal_1 |
+| 13 ContentsClearCount | 14 | ClearVal_2 | ClearVal_1 |
+| 15 SceneCardGradeGetCount | 15, or the sum if ClearVal_2 is -1 | grade | ClearVal_1 |
+| 29 TargetUnitGradeUpAchievement | 6 | (unit, grade) | > 0 |
+| 31 AttendanceCount | 34 | none | ClearVal_1 |
+| 34 UnitLevelUp | 37 | unit | ClearVal_2 |
+| 45 DungeonClearAchieve | 0 (DungeonClearCount) | dungeon id | -- |
+| 46 TotalUnitLevelUp | sum of 37, no baseline | -- | ClearVal_1 |
+| 56 AwakenPartsSlotIDMission | 43, or the sum if ClearVal_1 is -1 | node | ClearVal_2 |
+
+64 `UnitEquipAtSpecificSlot` and 65 `UnitSpecificAwaken` read no counter: they
+call into `NMUserInfo` and check the hero's own equipment and awakening, which
+already go out in `NGUnitInfo`. 61 `MultiCondition_ClearAny` needs
+`NGMissionMultiConditionInfo` from the server, which is not sent.
+
+New counters: AttendanceCount (once per UTC day at login), UnitLevelUp (a
+hero's best level), GetUnitCount by (hero, grade), AwakenPartsSlotOpenCount,
+SceneCardGradeGetCount, and GachaOpenCount per banner. A login backfill rebuilds
+them from the save, so earlier progress counts, and never lowers one. The
+summon Ack's safe shape still carries no collections -- they are deferred to
+the next Ack instead of dropped, so the Ack-parts experiment is unchanged.
+
+INFERRED, and flagged in the code: a multi-pull counts one open per hero; key
+43's second part is the node id (the guide rows only use the any-node sum, so
+it cannot change a guide result); a Relic counts towards type 15 however it was
+obtained; `Season` is 0 for chapters.
+
+**103 of the 147 guide missions can complete.** What blocks the rest is
+content this server does not implement: Advent Boss, Dimension Crack, Cube
+Dungeon, Hero Dungeon, the Dimension Gap boxes, Heart Heater's Quest House, the
+Other World Boss, request quests, equipment summons, accessories, artifact
+crafting and upgrade counts, resource spending, total hero level-ups (57), and
+multi-condition missions (61). **Because every chapter contains at least one of
+those, no chapter's final reward is reachable yet.** Also note that with value
+= level for CollectionType 37, "level up any hero 70 times" (46) is met at once
+by an account holding all 138 heroes.
+
+One real bug found on the way: mission state built inside the login payload
+was created *after* the login save and never persisted. `missions.touch` now
+pins it first.
+
+### Tests
+
+New `tools/test_mail_guide.py`, 51 checks, including live delivery from another
+thread and the dashboard's HTTP endpoints against a real server.
+
+## Thirteenth pass: modded client files, and a skill builder
+
+Done entirely without the emulator, so everything here stops at "the boot
+server serves the right bytes with the right crc". **A phone downloading an
+edited bundle and a battle using the new numbers is not verified yet.**
+
+### Getting a phone to fetch a changed bundle
+
+The old note in `download_info` said Unity's bundle `crc` couldn't be
+recalculated. It can: **it's a CRC32 over the bundle's uncompressed node data,
+concatenated in directory order** (what UnityPy exposes as the nodes of
+`BundleFile`). Checked against the shipped values of `script/unit`,
+`script/string`, `script/resource`, `script/tutorial` and the two-node
+`spritepacker/box` -- and against the device's own error for the patched unit,
+`calculated fa601253`, which is exactly what it gives.
+
+That matters because zeroing it had a hidden cost. `NMPatcher.CheckCompareFile`
+@0x1F53120 decides whether to download a file with nothing but
+`new.crc != old.crc` -- size isn't looked at, and the manifest crc doesn't
+short-circuit. Served 0 both times, a phone that already has a bundle never
+fetches a changed copy.
+
+So `tools/bootserver.py` now has an **overlay**: `client-overrides/` next to
+`server/` (or `--overlay` / `HC_CLIENT_OVERLAY`). A file there is served in
+front of the original, and if `client-overrides/crc.json` lists it
+(`{"script/unit": 1592191661}`) it goes out with that real crc. Everything else
+stays at 0 like before, so no one re-downloads the whole game. crc.json is
+re-read on every manifest request and the folder may appear after startup, so
+no restart. Deleting the folder is a full revert: crc goes back to 0, which
+differs from what the phone has, so it re-fetches the originals.
+`tools/test_bootserver_overlay.py`, 26 checks, for both the directory and zip
+forms of the client files.
+
+### The skill builder
+
+`server/skill-builder/` (gitignored, has its own README). A stdlib web app:
+pick a hero, see each skill level, the special skill and the passives in plain
+words, edit them in forms, Apply. It writes `client-overrides/AssetBundle/script/unit`
+(SkillData + PassiveEffect, encrypted like the original), `.../script/string`
+(English names/descriptions), crc.json, and the same rows into
+`table/herocantare.db` (backed up first). "Export for phone" zips the lot with
+install/undo commands.
+
+How a kit is put together, read off the tables:
+
+* `unitBaseSkill` = the three skills at level 1; `unitAwakenPartsInfo`
+  `unitSkillType` 0 = the next levels (`skillSlotType` 0-2, `skilllevel` 2-5),
+  1 = a passive (`skillID` is a PassiveEffect id), 2 = special.
+* **Special skills take their name, description and icon from
+  `SpecialSkillList`**, not `SkillActiveInfo`; icons are `skill_SpecialSkill_<id>`
+  in `spritepacker/common` (actives `skill_ChainSkill_`, passives `skill_PassiveSkill_`).
+* **Active and passive ids overlap** (217101 is both), so everything is keyed by kind.
+* **Most passives fire a hidden skill.** PassiveEffect effect type 0 ("use an
+  active skill") names a SkillData id in `intValue`; 1988 of 2018 exist only as
+  `skillType` 1, 29 only as 0. Which one the client picks when both exist is
+  UNKNOWN. The stun chance etc. of such a passive lives in that row.
+* SkillData ids 1022000-1022002 appear twice with the same type; read-only.
+* 170 awakening levels name a skill id that has no SkillData row (mostly
+  unreleased units); they're hidden.
+
+What the numbers mean, CONFIRMED against the heroes' own descriptions: an
+effect's `EffectPer` is its power (a fraction of ATK for Attack, Poison,
+Bleeding, Burn, Heal, piercing attacks; a percent for buffs/debuffs, HP% heals,
+shields; a flat number for Speed and Mana), `targetPer` its chance, `turn` its
+duration, `count` how many buffs/debuffs a cleanse removes. Passive
+`floatValue` is a fraction for every stat except the flat forms of
+ATK/HP/DEF/Speed; `If max count effect` + 1 is "(Activated Once)". The
+friendlier passive stat names (Debuff resist, Crit resist, Counterattack chance,
+...) come from the same check. `EffectPer2`, `CheckAddEffect` and the like are
+shown raw -- their meaning varies by effect and isn't pinned down.
+
+Edits only replace the spans of the rows that changed; every other byte of the
+tables stays as shipped (the game writes 17-digit floats we couldn't reproduce
+anyway). Rebuilt bundles are written uncompressed, so `script/string` grows
+from ~8 MB (LZ4HC) to ~30 MB.
+
+`server/skill-builder/tests/test_skill_builder.py`, 53 checks, runs the whole
+thing against the real client files in a temp sandbox.

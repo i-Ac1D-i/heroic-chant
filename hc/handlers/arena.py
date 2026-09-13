@@ -21,7 +21,7 @@ import logging
 
 from ..net import handler
 from ..protocol.dto import TYPES
-from ..game import state, arena, rewards
+from ..game import missions, state, arena, rewards
 from ..game.errors import Err
 from ..settings import SETTINGS
 
@@ -143,6 +143,10 @@ async def play_arena_reward(s, a):
 
     result, payout = arena.resolve(p, match, won, a.get('strRecordInfo') or '')
     touched = rewards.grant(p, payout)
+    # Arena missions -- the daily "Play 1vs1 Arena 3 times" among them -- read
+    # ContentsPlayCount / ContentsClearCount for contents 6.  Nothing advanced
+    # them before, so they could never complete.
+    missions.record_arena_fight(p, won)
     p.save()
     arena.invalidate_pool()
     rec = arena.record(p)

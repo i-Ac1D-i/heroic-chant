@@ -3,7 +3,7 @@ import logging
 
 from ..net import handler
 from ..protocol.dto import TYPES
-from ..game import state
+from ..game import state, missions, rewards, guide
 from ..game.errors import Err
 
 log = logging.getLogger('hc.misc')
@@ -28,12 +28,42 @@ async def attendance_reward(s, a):
 
 @handler(30029)
 async def get_mission_reward(s, a):
+    """Claim one or more missions.
+
+    This used to mark the missions done and pay nothing, which is why claiming
+    the arena's daily reward did nothing.  Now each mission is checked, paid
+    from `missionReward`, flagged received for its period, and sent back in
+    vecChangeMissionInfo so the client stops offering the claim.  The rules,
+    and which parts are inferred, are in hc/game/missions.py.
+    """
     p = s.player
-    done = set(p.d.get('missions_done', []))
-    done.update(a['vecMission'])
-    p.d['missions_done'] = sorted(done)
+    changed, payout, refused = [], [], []
+    for mission_id in (a.get('vecMission') or []):
+        row = missions.row(mission_id)
+        if row is None:
+            refused.append((mission_id, 'unknown'))
+            continue
+        entry = missions.state(p, row)
+        if entry['received']:
+            refused.append((mission_id, 'already received'))
+            continue
+        if not missions.complete(p, row):
+            done, need = missions.progress(p, row)
+            refused.append((mission_id, '%s/%s' % (done, need)))
+            continue
+        payout.extend(missions.reward(row))
+        entry['received'] = True
+        changed.append(missions.info(p, row))
+
+    rewards.grant(p, payout)
     p.save()
-    await s.send(40034, Err.OK, state.resource_sync(p), a['bShowEnable'])
+    if refused:
+        log.info('mission claim refused: %s', refused)
+    if changed:
+        log.info('claimed %d mission(s) -> %s', len(changed), payout)
+    await s.send(40034, Err.OK if changed or not refused else Err.INVALID,
+                 state.resource_sync(p, vecChangeMissionInfo=changed),
+                 a['bShowEnable'])
 
 
 @handler(30036)
@@ -105,3 +135,38 @@ async def unit_favorites_change(s, a):
     p.save()
     await s.send(40380, Err.OK,
                  state.resource_sync(p, vecChangeUnitInfo=state.unit_infos(p, [unit])))
+
+
+@handler(30307)
+async def get_guide_mission_final_reward(s, a):
+    """Claim a Guide Mission chapter's final reward.  Unhandled before.
+
+    The client only enables this once every mission in the chapter has been
+    claimed (NMResource.CheckCompleteLastMission @0x19FFD24), and the server
+    holds to the same rule.  See hc/game/guide.py.
+    """
+    p = s.player
+    chapter_id = int(a['_chapterID'])
+    row = guide.chapter(chapter_id)
+    if row is None:
+        log.info('no guide chapter %d', chapter_id)
+        await s.send(40329, Err.NOT_FOUND, guide.info(p, chapter_id),
+                     state.resource_sync(p))
+        return
+    if guide.reward_gained(p, chapter_id):
+        log.info('guide chapter %d reward already claimed', chapter_id)
+        await s.send(40329, Err.INVALID, guide.info(p, chapter_id),
+                     state.resource_sync(p))
+        return
+    if not guide.all_claimed(p, chapter_id):
+        log.info('guide chapter %d still has unclaimed missions', chapter_id)
+        await s.send(40329, Err.INVALID, guide.info(p, chapter_id),
+                     state.resource_sync(p))
+        return
+
+    payout = guide.final_reward(row)
+    rewards.grant(p, payout)
+    guide.book(p)[str(chapter_id)] = {'reward_gained': 1}
+    p.save()
+    log.info('guide chapter %d final reward -> %s', chapter_id, payout)
+    await s.send(40329, Err.OK, guide.info(p, chapter_id), state.resource_sync(p))

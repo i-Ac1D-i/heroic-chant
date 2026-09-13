@@ -342,6 +342,27 @@ def main():
             return call(s, 30007, vecChangeInfo=[TYPES['NGUnitEquipInfo'](
                 UnitUID=unit['uid'], ItemType=slot, ItemKey=key)])
 
+        # An unequipped relic must say -1, not 0.  The picker's own filter is
+        # `EquipUnitUID == -1` (PopupboxSceneCardList @0x16FD720); sent 0,
+        # every relic looked worn and none showed up to equip.
+        check('an unequipped relic reports EquipUnitUID -1',
+              scenecards.info(relic).EquipUnitUID == -1,
+              scenecards.info(relic).EquipUnitUID)
+        check('a hero has two relic slots, 9 and 10',
+              tuple(scenecards.SLOTS) == (9, 10), scenecards.SLOTS)
+
+        # The slot is locked until awakening node 10002 (slot 9) is open --
+        # itemSlotOpenState, checked by NMUnit.CheckItemOpenSlot @0x149A69C.
+        hero21['awaken'] = [x for x in (hero21.get('awaken') or [])
+                            if x not in (10002, 10004)]
+        wear(hero21, relic['uid'])
+        check('a locked relic slot refuses the relic', relic['equip'] == 0,
+              relic['equip'])
+        hero21['awaken'] = list(hero21.get('awaken') or []) + [10002]
+        check('opening node 10002 unlocks slot 9',
+              scenecards.slot_open(hero21, 9))
+        check('but not slot 10', not scenecards.slot_open(hero21, 10))
+
         d = wear(hero21, relic['uid'])
         check('a relic can be equipped', d['Error'] == 0, d['Error'])
         check('the relic knows its wearer and slot',
@@ -351,8 +372,12 @@ def main():
         worn = state.unit_infos(p, [hero21])[0]
         check('and it rides on the unit for opponents to see',
               len(worn.vecSceneCardInfo or []) == 1)
+        check('a worn relic reports its wearer, not -1',
+              scenecards.info(relic).EquipUnitUID == hero21['uid'])
         wear(hero21, 0)
         check('emptying the slot unequips it', relic['equip'] == 0)
+        check('and it reports -1 again',
+              scenecards.info(relic).EquipUnitUID == -1)
 
         print('\nthe Forge')
         check('slot 1 is free', p.forge_slot_open(scenecards.free_slot()))

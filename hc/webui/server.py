@@ -190,6 +190,55 @@ def _gear(query='', slot=-1, limit=100):
     return [r[4] for r in scored[:limit]]
 
 
+def _mail_rewards(raw):
+    """[{key: "t1:t2:t3", amount}] or [[t1, t2, t3, amount]] -> 4-tuples."""
+    out = []
+    for r in raw or []:
+        if isinstance(r, dict):
+            parts = list(_key_parts(str(r.get('key', ''))))
+            amount = int(r.get('amount', 0))
+        else:
+            parts, amount = list(r[:3]), int(r[3])
+        if len(parts) != 3 or amount <= 0 or int(parts[0]) < 0:
+            raise ValueError('bad attachment %r' % (r,))
+        out.append((int(parts[0]), int(parts[1]), int(parts[2]), amount))
+    return out
+
+
+def _send_mail(account_ids, body):
+    from ..game import mail
+    subject = str(body.get('subject') or '').strip()
+    if not subject:
+        raise ValueError('a post needs a subject')
+    rewards = _mail_rewards(body.get('rewards'))
+    hours = int(body.get('remove_hours') or mail.DEFAULT_REMOVE_HOURS)
+    post = None
+    for account_id in account_ids:
+        post = mail.send(account_id, subject, str(body.get('contents') or ''),
+                         rewards, sender=str(body.get('sender') or mail.SENDER),
+                         remove_hours=hours)
+    log.info('mail %r with %d attachment(s) sent to %d account(s)',
+             subject, len(rewards), len(account_ids))
+    return post
+
+
+def _mailbox(account_id):
+    from ..game import mail
+    pl = Player.load(account_id)
+    posts = (pl.d.get('posts') or []) if pl else []
+    return {
+        'pending': mail.pending(account_id),
+        'mailbox': [{'uid': p.get('uid'), 'subject': p.get('subject'),
+                     'received': bool(p.get('received')),
+                     'rewards': [{'key': '%d:%d:%d' % tuple(r[:3]),
+                                  'amount': r[3],
+                                  'name': TABLES.resource_name(*r[:3])}
+                                 for r in (p.get('rewards') or [])],
+                     'reg': p.get('reg')}
+                    for p in reversed(posts)][:50],
+    }
+
+
 def _clean_arena_bots(bots):
     """Run incoming bot teams through the arena's own validator.
 
@@ -486,6 +535,34 @@ class Handler(BaseHTTPRequestHandler):
                               if int(a) != account_id})
                 log.info('deleted account %d via dashboard', account_id)
                 return self._send(200, {'deleted': account_id})
+
+        # ---- mail ----
+        # Gifts go through the game's mail outbox, never into the save: an
+        # online account's save is held in memory by its session and would be
+        # overwritten.  See hc/game/mail.py.
+        m = re.fullmatch(r'/accounts/(\d+)/mail', path)
+        if m:
+            account_id = int(m.group(1))
+            if Player.load(account_id) is None:
+                return self._fail(404, 'no such account')
+            if method == 'GET':
+                return self._send(200, _mailbox(account_id))
+            if method == 'POST':
+                post = _send_mail([account_id], self._body())
+                return self._send(200, {'sent': 1, 'post': post,
+                                        **_mailbox(account_id)})
+
+        if path == '/mail' and method == 'POST':
+            body = self._body()
+            targets = body.get('accounts')
+            if targets in (None, '', 'all'):
+                targets = list(_account_ids())
+            else:
+                targets = [int(t) for t in targets]
+            if not targets:
+                return self._fail(400, 'no accounts to send to')
+            post = _send_mail(targets, body)
+            return self._send(200, {'sent': len(targets), 'post': post})
 
         m = re.fullmatch(r'/accounts/(\d+)/export', path)
         if m and method == 'GET':

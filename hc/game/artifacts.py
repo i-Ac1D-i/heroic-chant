@@ -130,7 +130,10 @@ def info(a):
         vecEffectInfo=effects(a),
         # This, not the unit's vecEquipInfo, is what the artifact screen reads to
         # decide whether an artifact is worn and by whom.
-        EquipUnitUID=int(a.get('equip', 0) or 0),
+        # -1 is the client's "nobody", as it is for Relics -- see
+        # scenecards.info.  The artifact picker happens not to filter on it,
+        # so this is for consistency rather than a confirmed bug.
+        EquipUnitUID=int(a.get('equip', 0) or 0) or -1,
         LockEnable=int(a.get('lock', 0)),
         ChangeUniqueRandEffectID=-1)
 

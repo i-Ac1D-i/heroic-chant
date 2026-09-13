@@ -358,6 +358,8 @@ class Player(object):
         from . import scenecards as sc
         r = sc.make(self.new_uid(), card_id)
         self.scenecards().append(r)
+        from . import missions                 # Guide: "craft a Relic"
+        missions.record_scenecard(self, card_id)
         return r
 
     def remove_scenecard(self, uid):
@@ -371,6 +373,15 @@ class Player(object):
             if int(r.get('equip', 0) or 0) == int(unit_uid)                     and int(r.get('slot', 0) or 0) == int(slot):
                 return r
         return None
+
+    # -- mail --------------------------------------------------------------
+    def posts(self):
+        """The mailbox.  Filled through hc.game.mail's outbox, never directly
+        by the dashboard -- see that module for why."""
+        return self.d.setdefault('posts', [])
+
+    def find_post(self, uid):
+        return next((p for p in self.posts() if int(p['uid']) == int(uid)), None)
 
     # -- the forge ---------------------------------------------------------
     def forge(self):
@@ -438,6 +449,11 @@ class Player(object):
         for k, v in self.d.setdefault('collections', {}).items():
             t1, t2, t3 = (int(x) for x in k.split(':'))
             yield t1, t2, t3, int(v)
+
+    def defer_collections(self, keys):
+        """Put taken collection keys back, so they go out on the next packet
+        instead of being lost."""
+        self._dirty_collections.update(keys or ())
 
     def take_dirty_collections(self):
         d, self._dirty_collections = self._dirty_collections, set()

@@ -77,6 +77,13 @@ def _equip_scenecard(p, unit, slot, uid, changed):
     if relic is None:
         log.info('unit %s cannot equip relic %d: not owned', unit['uid'], uid)
         return False
+    if not scenecards.slot_open(unit, slot):
+        # The client locks the slot until awakening node 10002 (slot 9) or
+        # 10004 (slot 10) is open, so this only fires for a client that did
+        # not check.  "Can be opened in Awakening Tree" is string 2688.
+        log.info('unit %s relic slot %d is locked (needs awaken node %s)',
+                 unit['uid'], slot, scenecards.SLOT_OPEN_NODE.get(slot))
+        return False
 
     # Same card id already on this hero in another slot.
     for other in p.scenecards():
@@ -355,3 +362,113 @@ async def artifact_level_up(s, a):
     await s.send(40019, Err.OK, state.resource_sync(
         p, vecChangeArtifactInfo=[artifacts.info(target)],
         vecDelArtifactInfo=removed))
+
+
+# ----------------------------------------------------- exclusive equipment --
+def _can_afford(p, costs):
+    for t1, t2, amount in costs:
+        have = p.total_cash() if t1 == p.TOTAL_CASH else p.get_resource(t1, t2)
+        if have < amount:
+            return False
+    return True
+
+
+def _charge(p, costs):
+    for t1, t2, amount in costs:
+        p.spend_resource(t1, amount, t2)
+
+
+def _exclusive_grade_up(p, item_id, grade_type, worn_by=None):
+    """Raise one exclusive item a grade.  Returns (Err, success, changed unit).
+
+    `worn_by` is the unit wearing it (30217) or None for one in the bag
+    (30216).  Both modes are documented in hc/game/equipment.py, with the
+    client RVAs they were read from.
+    """
+    recipe = equipment.exclusive_recipe(item_id)
+    if recipe is None:
+        log.info('exclusive item %s has no next grade', item_id)
+        return Err.INVALID, False, None
+
+    if int(grade_type) == equipment.GRADEUP_FIX:
+        need = recipe['fusion']
+        if need <= 0:
+            log.info('exclusive item %s cannot be fused', item_id)
+            return Err.INVALID, False, None
+        owned = p.get_resource(equipment.ITEM, item_id)
+        have = owned + (1 if worn_by is not None else 0)
+        if have < need:
+            log.info('fusing exclusive item %s needs %d copies, have %d',
+                     item_id, need, have)
+            return Err.NOT_ENOUGH, False, None
+        from_bag = need - (1 if worn_by is not None else 0)
+        p.add_resource(equipment.ITEM, -from_bag, item_id)
+        if worn_by is not None:
+            worn_by.setdefault('equip', {})[str(equipment.EXCLUSIVE_SLOT)] = \
+                recipe['result']
+        else:
+            p.add_resource(equipment.ITEM, 1, recipe['result'])
+        log.info('fused %d x exclusive item %s -> %s', need, item_id,
+                 recipe['result'])
+        return Err.OK, True, worn_by
+
+    # Normal: Enhance.
+    if worn_by is None and p.get_resource(equipment.ITEM, item_id) < 1:
+        log.info('no exclusive item %s in the bag to enhance', item_id)
+        return Err.NOT_FOUND, False, None
+    costs = equipment.enhance_costs(recipe)
+    if not _can_afford(p, costs):
+        log.info('enhancing exclusive item %s needs %s', item_id, costs)
+        return Err.NOT_ENOUGH, False, None
+    _charge(p, costs)
+    success = random.randrange(1000) < recipe['ratio']
+    if success:
+        if worn_by is not None:
+            worn_by.setdefault('equip', {})[str(equipment.EXCLUSIVE_SLOT)] = \
+                recipe['result']
+        else:
+            p.add_resource(equipment.ITEM, -1, item_id)
+            p.add_resource(equipment.ITEM, 1, recipe['result'])
+    log.info('enhanced exclusive item %s -> %s: %s (%d/1000, paid %s)',
+             item_id, recipe['result'], 'success' if success else 'failed',
+             recipe['ratio'], costs)
+    return Err.OK, success, worn_by
+
+
+@handler(30216)
+async def exclusive_look_item_grade_up(s, a):
+    """Raise an exclusive item in the bag a grade.  Unhandled before."""
+    p = s.player
+    item_id = int(a['itemID'])
+    if not equipment.is_exclusive(item_id):
+        await s.send(40238, Err.INVALID, state.resource_sync(p), False)
+        return
+    err, success, _ = _exclusive_grade_up(p, item_id, a['GradeUpType'])
+    if err == Err.OK:
+        p.save()
+    await s.send(40238, err, state.resource_sync(p), bool(success))
+
+
+@handler(30217)
+async def equip_exclusive_look_item_grade_up(s, a):
+    """Raise the exclusive item a hero is wearing a grade.  Unhandled before.
+
+    The client's own subject for this Ack emits the changed NGUnitInfo, so the
+    unit goes back in vecChangeUnitInfo whether or not the roll succeeded.
+    """
+    p = s.player
+    unit = p.find_unit(a['baseUnitUID'])
+    if unit is None:
+        await s.send(40239, Err.NOT_FOUND, state.resource_sync(p), False)
+        return
+    item_id = to_int((unit.get('equip') or {}).get(str(equipment.EXCLUSIVE_SLOT)), 0)
+    if item_id <= 0 or not equipment.is_exclusive(item_id):
+        log.info('unit %s wears no exclusive item', unit['uid'])
+        await s.send(40239, Err.INVALID, state.resource_sync(p), False)
+        return
+    err, success, _ = _exclusive_grade_up(p, item_id, a['GradeUpType'],
+                                          worn_by=unit)
+    if err == Err.OK:
+        p.save()
+    await s.send(40239, err, state.resource_sync(
+        p, vecChangeUnitInfo=state.unit_infos(p, [unit])), bool(success))

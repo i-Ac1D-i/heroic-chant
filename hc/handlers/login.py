@@ -5,7 +5,8 @@ from datetime import datetime
 from .. import config
 from ..net import handler
 from ..protocol.dto import TYPES
-from ..game import state, gacha, guild, shop, artifacts, scenecards
+from ..game import (state, gacha, guild, shop, artifacts, scenecards, missions,
+                    mail, guide)
 from ..game.errors import Err
 from ..game.player import Player
 from .center import account_for_device
@@ -53,6 +54,11 @@ def _large_data(player):
         # relic screen is empty without them.
         vecSceneCardInfo=scenecards.infos(player),
         vecUnit=state.unit_infos(player),
+        # Daily and weekly missions, with this period's baseline and whether
+        # each has been claimed -- so a claimed daily does not come back as
+        # claimable after a relogin.
+        vecMissionInfo=missions.infos(player),
+        vecPostInfo=mail.infos(player),
         vecPartyInfo=[state.party_info(p) for p in player.d.get('party', [])],
         vecShopGoods=shop.all_shop_goods(player),
         bEndPacket=True,
@@ -70,6 +76,16 @@ async def login(s, a):
     # the client's "previous progress was not complete" check.  The hero was
     # already granted when it was rolled, so nothing is lost by dropping it.
     player.clear_gacha_results()
+    # Mail that arrived while offline -- or before a restart -- goes into the
+    # mailbox now, so it is in the login payload rather than a packet later.
+    mail.load_pending(account_id)
+    mail.drain(player)
+    mail.prune(player)
+    # Mission counters the Guide Mission reads: a day logged in, and each
+    # hero's best level (rebuilt from the save, for heroes levelled earlier).
+    missions.touch(player)
+    missions.record_login(player)
+    missions.backfill(player)
     player.save()
     s.account, s.player = account_id, player
 
@@ -77,7 +93,9 @@ async def login(s, a):
              account_id, player.nickname, a['ClientVersion'], len(player.d['units']))
 
     await s.send(40000, _ack01(player))
-    await s.send(40001, TYPES['NGLogInAck02']())
+    # The Guide Mission's chapters, and whether each final reward is claimed.
+    await s.send(40001, TYPES['NGLogInAck02'](
+        vecUserGuideMissionChapter=guide.infos(player)))
     # vecAwakenStat is the account's claimed Awakening Passive Mastery stats.
     # Without it every one of them reads as unclaimed after a relogin, and
     # rank-up -- which is gated on the stat, not on the star count -- locks

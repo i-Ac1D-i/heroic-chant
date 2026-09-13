@@ -48,3 +48,8 @@ build-apk/
 
 # Server owner settings, written by the dashboard.
 /settings.json
+
+# --- local tools -------------------------------------------------------------
+# The skill builder edits game data out of your own copy of the client, so like
+# the extracted tables above it stays out of the repo.
+/skill-builder/

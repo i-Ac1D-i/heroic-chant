@@ -126,9 +126,42 @@
       </div>
     </div>
 
+    <h2 style="margin-top:16px">Send mail</h2>
+    <p class="help">Arrives in the in-game mailbox without restarting the game —
+      on the player's next action if they are online, at login if not.
+      Attachments are claimed from the mailbox. This is the way to give a
+      <strong>logged-in</strong> account something: edits to the wallet below
+      are overwritten by the game while that account is online.</p>
+    <div class="row">
+      <div style="flex:2 1 220px"><label>Subject</label><input id="mailSubject" placeholder="e.g. A gift"></div>
+      <div style="flex:3 1 280px"><label>Message</label><input id="mailContents" placeholder="Optional"></div>
+      <div><label>Expires after (days)</label><input id="mailDays" type="number" value="30" min="1"></div>
+    </div>
+    <div class="row">
+      <div style="flex:2 1 260px"><label>Attach something — search by name</label>
+        <input id="mailSearch" placeholder="e.g. Gold, Q's Memory" autocomplete="off">
+        <select id="mailPick" size="6" hidden style="margin-top:4px"></select></div>
+      <div><label>Key</label><input id="mailKey" class="mono" placeholder="0:-1:-1"></div>
+      <div><label>Amount</label><input id="mailAmount" type="number" placeholder="0" min="1"></div>
+      <div style="flex:0 0 auto"><button class="ghost" id="mailAttach">Attach</button></div>
+    </div>
+    <div class="row"><div style="flex:1 1 100%" id="mailAttachments" class="muted">No attachments.</div></div>
+    <div class="row">
+      <div style="flex:0 0 auto"><label><input type="checkbox" id="mailAll" style="width:auto"> Send to every account</label></div>
+      <div style="flex:0 0 auto"><button class="act" id="mailSend">Send</button></div>
+      <div style="flex:1 1 200px" id="mailStatus" class="muted"></div>
+    </div>
+    <div class="tablewrap" style="max-height:220px; overflow-y:auto">
+      <table id="mailTable">
+        <thead><tr><th>Subject</th><th>Attachments</th><th>Status</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
     <h2 style="margin-top:16px">Currencies &amp; inventory</h2>
     <p class="help">Absolute values. Set one to 0 to remove it. Keys are
-      <code>type1:type2:type3</code> — most currencies only use type1.</p>
+      <code>type1:type2:type3</code> — most currencies only use type1.
+      Only reliable while the account is offline — use mail above otherwise.</p>
     <div class="row">
       <div><label>Filter what you have</label><input id="resFilter" placeholder="e.g. Memory, Shard, Gold"></div>
     </div>
@@ -465,8 +498,94 @@ async function openAccount(id) {
   $('#edNick').value = ACCT.nickname || '';
   $('#edExp').value = ACCT.exp || 0;
   renderResources(); renderRoster();
+  MAIL_ATTACH = []; renderAttachments(); loadMailbox();
   $('#editor').scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
+
+/* ---- mail ---- */
+let MAIL_ATTACH = [];
+function renderAttachments() {
+  const box = $('#mailAttachments');
+  if (!MAIL_ATTACH.length) { box.textContent = 'No attachments.'; return; }
+  box.innerHTML = MAIL_ATTACH.map((a, i) =>
+    `<span class="pill" style="margin-right:6px">${a.name} ×${a.amount}
+     <a href="#" data-unattach="${i}" style="color:var(--bad);text-decoration:none">✕</a></span>`
+  ).join('');
+  $$('#mailAttachments [data-unattach]').forEach(el => el.onclick = e => {
+    e.preventDefault();
+    MAIL_ATTACH.splice(parseInt(el.dataset.unattach, 10), 1);
+    renderAttachments();
+  });
+}
+async function loadMailbox() {
+  if (!ACCT) return;
+  const {pending, mailbox} = await api('/accounts/' + ACCT.account_id + '/mail');
+  const tb = $('#mailTable tbody');
+  const rows = [];
+  if (pending) rows.push(`<tr><td colspan="3" class="muted">${pending} post(s) on the way — delivered on the player's next action</td></tr>`);
+  for (const m of mailbox) {
+    const att = m.rewards.length
+      ? m.rewards.map(r => `${r.name} ×${r.amount}`).join(', ') : '<span class="muted">none</span>';
+    rows.push(`<tr><td>${m.subject || ''}</td><td>${att}</td>
+      <td>${m.received ? 'Claimed' : '<span class="muted">Not claimed</span>'}</td></tr>`);
+  }
+  tb.innerHTML = rows.join('') || '<tr><td colspan="3" class="muted">The mailbox is empty.</td></tr>';
+}
+let mailTimer = null;
+$('#mailSearch').oninput = e => {
+  clearTimeout(mailTimer);
+  const q = e.target.value.trim();
+  const sel = $('#mailPick');
+  if (q.length < 1) { sel.hidden = true; return; }
+  mailTimer = setTimeout(async () => {
+    try {
+      const {resources} = await api('/resources?limit=100&q=' + encodeURIComponent(q));
+      sel.innerHTML = resources.map(r =>
+        `<option value="${r.key}" data-name="${r.name.replace(/"/g, '&quot;')}">${r.name}  —  ${r.key}</option>`).join('');
+      sel.hidden = !resources.length;
+    } catch (err) { toast(err.message, true); }
+  }, 220);
+};
+$('#mailPick').onchange = e => {
+  $('#mailKey').value = e.target.value;
+  $('#mailKey').dataset.name = e.target.selectedOptions[0].dataset.name;
+  $('#mailAmount').focus();
+};
+$('#mailAttach').onclick = () => {
+  const key = $('#mailKey').value.trim();
+  const amount = parseInt($('#mailAmount').value || '0', 10);
+  if (!/^-?\d+(:-?\d+){0,2}$/.test(key)) return toast('Pick something to attach', true);
+  if (amount <= 0) return toast('Amount must be at least 1', true);
+  const parts = key.split(':');
+  while (parts.length < 3) parts.push('-1');
+  const full = parts.join(':');
+  MAIL_ATTACH.push({key: full, amount,
+                    name: $('#mailKey').dataset.name || resName(full)});
+  $('#mailKey').value = ''; $('#mailAmount').value = ''; $('#mailSearch').value = '';
+  $('#mailKey').dataset.name = ''; $('#mailPick').hidden = true;
+  renderAttachments();
+};
+$('#mailSend').onclick = async () => {
+  const subject = $('#mailSubject').value.trim();
+  if (!subject) return toast('Give the post a subject', true);
+  const body = {subject, contents: $('#mailContents').value,
+                remove_hours: 24 * Math.max(1, parseInt($('#mailDays').value || '30', 10)),
+                rewards: MAIL_ATTACH.map(a => ({key: a.key, amount: a.amount}))};
+  try {
+    let r;
+    if ($('#mailAll').checked) {
+      if (!confirm('Send this to every account on the server?')) return;
+      r = await post('/mail', Object.assign({accounts: 'all'}, body));
+    } else {
+      if (!ACCT) return;
+      r = await post('/accounts/' + ACCT.account_id + '/mail', body);
+    }
+    toast(`Sent to ${r.sent} account(s)`);
+    $('#mailStatus').textContent = `“${subject}” sent to ${r.sent} account(s).`;
+    $('#mailSubject').value = ''; $('#mailContents').value = '';
+    MAIL_ATTACH = []; renderAttachments(); loadMailbox();
+  } catch (err) { toast(err.message, true); }
+};
 function renderResources() {
   const filter = $('#resFilter').value.trim().toLowerCase();
   const tb = $('#resTable tbody');

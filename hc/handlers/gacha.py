@@ -6,7 +6,7 @@ import os
 from ..net import handler
 from ..protocol.dto import TYPES
 from ..data.tables import TABLES, to_int
-from ..game import state, gacha, rewards
+from ..game import state, gacha, rewards, missions
 from ..game.errors import Err
 
 log = logging.getLogger('hc.gacha')
@@ -135,6 +135,7 @@ async def instant_summon(s, a):
             rewards.grant(p, shards)
             reel.extend(state.resource_info(*sh) for sh in shards)
     p.bump_summon_count(gid, len(results))
+    missions.record_summon(p, gid, len(results))   # Guide: "Open Portal N times"
     p.save()
     log.info('banner %d x%d -> %d new, %d duplicate',
              gid, count, len(added), len(results) - len(added))
@@ -168,6 +169,11 @@ def summon_ack_shape(p, gid, added):
     extra = {}
     if 'collections' in parts and dirty_cols:
         extra['vecAddCollectionInfo'] = state.collection_infos(p, dirty_cols)
+    elif dirty_cols:
+        # The safe shape leaves collections out, but that must not mean
+        # losing them -- the summon counter the Guide Mission reads is among
+        # them.  They go out on the next Ack instead; this Ack is unchanged.
+        p.defer_collections(dirty_cols)
     if 'units' in parts:
         extra['vecAddUnitInfo'] = [state.unit_info(u) for u in added]
     if 'dimension' in parts:
@@ -228,6 +234,7 @@ async def join_dimension_gacha(s, a):
                 log.info('duplicate %s -> %s', _name(uid), shards or 'nothing')
         if rolled:
             p.bump_summon_count(gid, len(rolled))
+            missions.record_summon(p, gid, len(rolled))
             p.save()
             log.info('cube pull on banner %d -> %s', gid,
                      ', '.join('%s(R%d)' % (_name(u), r) for u, r in rolled))

@@ -48,6 +48,21 @@ def donation_cap():
     return to_int(info().get('DonationCount'), 5)
 
 
+def roll_donation_day(g, now=None):
+    """Reset today's donation count if the day has changed.  Returns g.
+
+    This used to happen only inside GuildDonationReq.  But the client greys
+    out the Donate button from NGGuildMember.DonationCount, which it gets at
+    login and on every guild packet -- so on a new day it still saw yesterday's
+    full count, never sent the request, and the reset never ran.  Rolling the
+    day wherever the count goes out closes that loop.
+    """
+    today = (now or datetime.utcnow()).date().isoformat()
+    if g.get('donation_day') != today:
+        g['donation_day'], g['donation_count'] = today, 0
+    return g
+
+
 def level_for(contribution):
     """Guild level from accumulated contribution, per GuildLevelInfo."""
     level = 1
@@ -120,17 +135,24 @@ def guild_dto(player):
     g = player.d.get('guild')
     if not g:
         return TYPES['NGGuild']()
-    now = datetime.utcnow()
     buffs = []
     for passive, b in (g.get('buffs') or {}).items():
+        # Every unlocked buff goes out, expired or not.  The buff board takes a
+        # buff's level from here -- GuildBuffScrollViewItem.Init @0x19C4D28
+        # calls NMUserInfo.GetGuildTopLevelBuff, and falls back to level 0 when
+        # nothing is found.  This used to drop a buff once its timer ran out,
+        # so after six hours the board showed level 0 while the save still
+        # held the real level, and upgrading misfired.  An expired DurationTime
+        # is simply shown as expired; the level itself is an unlock.
         try:
             until = datetime.fromisoformat(b['until'])
         except (KeyError, TypeError, ValueError):
+            until = datetime(2000, 1, 1)
+        if int(b.get('buff_uid', 0)) <= 0:
             continue
-        if until > now:
-            buffs.append(TYPES['NGGuildBuff'](
-                BuffUID=int(b.get('buff_uid', 0)), PassiveID=int(passive),
-                DurationTime=until))
+        buffs.append(TYPES['NGGuildBuff'](
+            BuffUID=int(b.get('buff_uid', 0)), PassiveID=int(passive),
+            DurationTime=until))
     return TYPES['NGGuild'](
         UID=int(g['uid']), Name=g['name'], Introduction=g.get('introduction', ''),
         MarkFlag=int(g.get('mark_flag', 0)),
@@ -151,6 +173,7 @@ def guild_member_dto(player):
     g = player.d.get('guild')
     if not g:
         return TYPES['NGGuildMember']()
+    roll_donation_day(g)
     m = g.get('member', {})
     return TYPES['NGGuildMember'](
         AccountID=player.account_id, GuildUID=int(g['uid']),
@@ -160,11 +183,33 @@ def guild_member_dto(player):
         Donation=int(m.get('donation', 0)),
         Contribution=int(m.get('contribution', 0)),
         WeeklyContriubution=int(m.get('contribution', 0)), WeeklySeason=0,
-        tmLastLogIn=datetime.utcnow(), tmLastDonation=datetime.utcnow(),
+        # tmLastDonation used to be "now" unconditionally, which told the
+        # client a donation had just happened every time it asked.
+        tmLastLogIn=datetime.utcnow(),
+        tmLastDonation=state._dt(g.get('last_donation')),
         Comment=m.get('comment', ''), RaidTicketCount=0,
         DonationCount=int(g.get('donation_count', 0)), ConnectState=1,
         SkinID=player.d.get('skin_id', 0), DailySeason=0, GuildWarsSeason=0,
-        frameInfo=TYPES['NGFrameInfo']())
+        frameInfo=TYPES['NGFrameInfo'](),
+        # The saved Guild War defence team, so it is still there on reopen.
+        vecGuildWarParty=war_party(player),
+        vecGuildWarUnit=war_units(player))
+
+
+def war_party(player):
+    g = player.d.get('guild') or {}
+    return [TYPES['NGPartyInfo'](SlotType=int(r.get('slot_type', 0)),
+                                 SlotIndex=int(r.get('slot_index', 0)),
+                                 UnitUID=int(r.get('unit_uid', 0)),
+                                 SkillOnOff=int(r.get('skill_on_off', 0)))
+            for r in (g.get('war_party') or [])]
+
+
+def war_units(player):
+    g = player.d.get('guild') or {}
+    uids = {int(r.get('unit_uid', 0)) for r in (g.get('war_party') or [])}
+    units = [u for u in player.d.get('units', []) if int(u['uid']) in uids]
+    return state.unit_infos(player, units)
 
 
 def guild_shop_goods(player, uid):

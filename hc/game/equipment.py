@@ -64,6 +64,72 @@ def grade_up_recipe(item_id):
     }
 
 
+# ------------------------------------------------------ exclusive equipment --
+#
+# EItemType.ExclusiveLook (15): the 695 `itemList` rows with itemType 15.
+# They stack in the wallet like gear and are worn in slot 15.  Two ways to
+# raise one a grade, read off the client rather than guessed:
+#
+#   Normal / Enhance (ExclusiveLookGradeUp.Normal = 0)
+#       PopupboxExclusiveLookItemEnhance, click @0x18D6854, runs the same
+#       NMUnit.CheckUpgradeItem @0x1495B78 that gear uses.  That reads
+#       req_itemID x req_itemCount (other gear, as material), gradeUp_gold,
+#       gradeUp_Diamond and ResourceType_1/2 x ResourceVal_1 -- some chains are
+#       paid in gear, others in EventCoin (119).  Then a SuccessRatio roll,
+#       per-mille.  A failure still spends the materials.
+#
+#   Fix / Fusion (ExclusiveLookGradeUp.Fix = 1)
+#       PopupboxExclusiveLookItemFusion, click @0x18D776C: copies of *this*
+#       item owned (GetResourceLongValue(Item, id)) plus one if it is worn must
+#       reach ItemInfo.FusionCount (+0xB8), else Error 1227
+#       (Error_ExclusiveLookItemNotEnoughMaterial).  No roll, and nothing else
+#       is checked -- no gold.  FusionCount copies are consumed.
+EXCLUSIVE_SLOT = 15
+GRADEUP_NORMAL, GRADEUP_FIX = 0, 1
+
+
+def is_exclusive(item_id):
+    row = item(item_id)
+    return bool(row) and to_int(row.get('itemType'), -1) == EXCLUSIVE_SLOT
+
+
+def exclusive_recipe(item_id):
+    """Everything both grade-up modes need, or None at the top of the chain."""
+    row = item(item_id)
+    if not row or to_int(row.get('itemType'), -1) != EXCLUSIVE_SLOT:
+        return None
+    result = to_int(row.get('result_itemID'), -1)
+    if result < 0:
+        return None
+    return {
+        'material': to_int(row.get('req_itemID'), -1),
+        'count': max(to_int(row.get('req_itemCount'), 0), 0),
+        'gold': max(to_int(row.get('gradeUp_gold'), 0), 0),
+        'diamond': max(to_int(row.get('gradeUp_Diamond'), 0), 0),
+        'extra': (to_int(row.get('ResourceType_1'), -1),
+                  to_int(row.get('ResourceType_2'), -1),
+                  max(to_int(row.get('ResourceVal_1'), 0), 0)),
+        'result': result,
+        'ratio': to_int(row.get('SuccessRatio'), 1000),
+        'fusion': to_int(row.get('FusionCount'), -1),
+    }
+
+
+def enhance_costs(recipe):
+    """[(type1, type2, amount)] an Enhance charges, in the order it checks."""
+    out = []
+    if recipe['material'] > 0 and recipe['count'] > 0:
+        out.append((ResourceType.Item, recipe['material'], recipe['count']))
+    t1, t2, val = recipe['extra']
+    if t1 >= 0 and val > 0:
+        out.append((t1, t2, val))
+    if recipe['gold'] > 0:
+        out.append((ResourceType.Gold, -1, recipe['gold']))
+    if recipe['diamond'] > 0:
+        out.append((ResourceType.TotalCash, -1, recipe['diamond']))
+    return out
+
+
 def rune_cost(table, grade_up_id, fix=False):
     """Cost of one rune step from runeGradeUp / runeChange.
 
