@@ -2,6 +2,63 @@
 
 ## Unreleased
 
+### Profile
+
+You can change your nickname, profile frame, background and main hero.
+The main hero picker used to be empty no matter how many heroes you had.
+Thanks to Yukioooh for these.
+
+### Mail, and gifts that arrive without a relog
+
+The mailbox works: posts show up, can be claimed one at a time or all at once,
+and deleted. The dashboard has a **Send mail** card on each account (and a
+"send to everyone" option), with attachments. A player who's online gets the
+post on their next action, so there's no more closing and reopening the game
+after a gift.
+
+### Guide Mission
+
+The Guide Mission is in: all four chapters, their missions, rewards and each
+chapter's final reward. **90 of the 147 missions can be completed right now.**
+The rest need content this server doesn't have yet (Advent Boss, Hero Dungeon,
+Trial Tower, Chaos Crack, Dimension Gap, World Raid and a few more), so no
+chapter's final reward is reachable yet.
+
+Mission progress is now tracked the way the game reads it: logins, hero levels
+and level-ups, stars, awakening nodes, portal opens, equipment upgrades and so
+on. Progress made before this update counts too.
+
+### Guilds
+
+- Guild War teams save, and you can leave that screen without restarting.
+- Guild buffs can be upgraded.
+- The daily donation resets every day.
+
+### Arena
+
+Claiming the daily reward for arena wins pays out.
+
+### Exclusive equipment
+
+Exclusive equipment can be upgraded.
+
+### For modders
+
+The boot server can serve modified game files from a `client-overrides/`
+folder next to `server/`. Files there are sent with their real checksum, so a
+phone that already has the originals downloads just the changed ones, and
+deleting the folder puts everything back. See `tools/bootserver.py`.
+
+### Tests
+
+```bash
+python tools/test_guild_missions.py
+python tools/test_mail_guide.py
+python tools/test_bootserver_overlay.py
+```
+
+## 2026-09-11
+
 ### Heroes can be starred up past 3 stars
 
 Star-up charges a hero's own Memory from the third star on, and nothing in the
