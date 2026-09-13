@@ -52,6 +52,22 @@ def collection_infos(player, only=None):
             if only is None or (t1, t2, t3) in only]
 
 
+def user_info(player):
+    """NGUserInfo -- the in-game profile card: nickname, rank EXP, represented
+    hero, frame, skin.  Distinct from `center.account_info`'s NGAccountInfo,
+    which wraps the same handful of fields for the center-server login flow."""
+    return TYPES['NGUserInfo'](
+        NickName=player.nickname,
+        Exp=player.d['exp'],
+        RegDate=_dt(player.d['reg_date']),
+        LastLoginDate=_dt(player.d.get('last_login', player.d['reg_date'])),
+        RepresentProfile=player.d['represent_profile'],
+        AccountID=player.account_id,
+        SkinID=player.d['skin_id'],
+        frameInfo=TYPES['NGFrameInfo'](frameID=player.d.get('frame_id', 0)),
+    )
+
+
 def equip_info(u):
     """NGUnitEquipInfo per occupied slot: gear first, then rune slots.  Both
     ride the same list -- ItemType is the slot, ItemKey what is in it."""
