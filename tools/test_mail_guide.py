@@ -102,6 +102,7 @@ def main():
     from hc.game import mail, missions, guide
     from hc.game.enums import CollectionType, ResourceType
     from hc.protocol.dto import TYPES
+    from hc.data.tables import TABLES
     import hc.handlers                                    # registers handlers
 
     httpd = None
@@ -238,6 +239,11 @@ def main():
             m.StartCollectionValue == 0 for m in large['ngAck'].vecMissionInfo
             if m.Type == missions.GUIDE))
 
+        multi = ack02['ngAck'].vecMissionMultiConditionInfo or []
+        check('the multi-condition guide missions get their record',
+              sorted(m.ID for m in multi) == [100006, 100021, 100022, 100028],
+              [m.ID for m in multi])
+
         g = Player.load(g.account_id)
         gsess = FakeSession(g)
 
@@ -278,6 +284,44 @@ def main():
         check('opening an awakening node records it',
               g.get_collection(CollectionType.AwakenPartsSlotOpenCount, t2=node)
               == before + 1)
+        row = missions.row(100109)            # "Level Up Hero" x30, lifetime
+        done, need = missions.progress(g, row)
+        level = int(hero['level'])
+        call(gsess, 30001, uid=hero['uid'])
+        check('a hero level-up counts towards "Level Up Hero"',
+              int(hero['level']) == level + 1
+              and missions.progress(g, row) == (done + 1, need),
+              (missions.progress(g, row), done, need))
+
+        from hc.game import equipment as equipment_mod
+        from hc.data.tables import to_int
+        # The in-place upgrade of worn gear (30066) always succeeds, so it
+        # gives a deterministic check.
+        row5 = next(r for r in TABLES.sql('itemList')
+                    if to_int(r.get('itemType'), -1) == 1
+                    and equipment_mod.grade_up_recipe(to_int(r['itemID'])))
+        item = to_int(row5['itemID'])
+        recipe = equipment_mod.grade_up_recipe(item)
+        hero.setdefault('equip', {})['1'] = item
+        g.add_resource(equipment_mod.ITEM, recipe['count'], recipe['material'])
+        g.add_resource(ResourceType.Gold, recipe['gold'] + 1)
+        before = g.get_collection(CollectionType.ItemGradeUpCount)
+        d = call(gsess, 30066, uidUnit=hero['uid'], itemType=1)
+        check('an equipment upgrade counts towards "Upgrade Equipment"',
+              d['Error'] == 0 and hero['equip']['1'] == recipe['result']
+              and g.get_collection(CollectionType.ItemGradeUpCount) == before + 1,
+              (d['Error'], g.get_collection(CollectionType.ItemGradeUpCount)))
+        progress = missions.progress(g, missions.row(100142))   # "Upgrade Equipment" x5
+        check('and the mission reads that counter',
+              progress == (g.get_collection(CollectionType.ItemGradeUpCount), 5), progress)
+
+        before = g.get_collection(CollectionType.ArtifactGradeGetCount, t2=5)
+        artifact_id = next(a for a in __import__('hc.game.artifacts', fromlist=['x'])
+                           .catalogue(grades=(5,)))
+        g.add_artifact(artifact_id)
+        check('getting an artifact records its grade',
+              g.get_collection(CollectionType.ArtifactGradeGetCount, t2=5) == before + 1)
+
         before = g.get_collection(CollectionType.SceneCardGradeGetCount, t2=5)
         g.add_scenecard(95007)
         check('getting a relic records its grade',
@@ -309,6 +353,13 @@ def main():
         check('hero levels are rebuilt from the save',
               fresh.get_collection(CollectionType.UnitLevelUp,
                                    t2=int(fresh.d['units'][0]['id'])) == 42)
+        check('and so is the level-up count, one per level above 1',
+              fresh.get_collection(CollectionType.AllUnitLevelUpCount,
+                                   t2=int(fresh.d['units'][0]['id'])) >= 41)
+        check('owned artifacts are counted by grade',
+              sum(v for t1, _a, _b, v in fresh.collection_items()
+                  if t1 == CollectionType.ArtifactGradeGetCount)
+              == len(fresh.d.get('artifacts', [])))
         missions.backfill(fresh)
         check('and running it again changes nothing',
               fresh.get_collection(CollectionType.UnitLevelUp,

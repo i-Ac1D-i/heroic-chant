@@ -327,6 +327,8 @@ class Player(object):
         from . import artifacts as art
         a = art.make(self.new_uid(), artifact_id)
         self.artifacts().append(a)
+        from . import missions                 # Guide: "craft an Artifact"
+        missions.record_artifact(self, artifact_id)
         return a
 
     def remove_artifact(self, uid):

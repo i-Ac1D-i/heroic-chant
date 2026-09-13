@@ -57,12 +57,17 @@ GUIDE = 21                        # MissionType.GuideMission
 #   13 ContentsClearCount             GetKey(14, ClearVal_2)  >= ClearVal_1
 #   31 AttendanceCount    @0x2278FFC  GetKey(34)              >= ClearVal_1
 #   34 UnitLevelUp        @0x2278BB4  GetKey(37, ClearVal_1)  >= ClearVal_2
-KEY_NONE, KEY_VAL1, KEY_VAL2 = None, 'ClearVal_1', 'ClearVal_2'
+#    3 ItemUpgrade        @0x2278E78  GetKey(2)               >= ClearVal_1
+#   57 TotalUnitLevelUpMission @0x2278A7C  GetCollectionTypeAllValue(52) --
+#                         every key summed -- into the same tail  >= ClearVal_1
+KEY_NONE, KEY_VAL1, KEY_VAL2, KEY_ALL = None, 'ClearVal_1', 'ClearVal_2', 'all'
 CLEAR_RULES = {
+    3: (CollectionType.ItemGradeUpCount, KEY_NONE, 'ClearVal_1'),
     12: (CollectionType.ContentsPlayCount, KEY_VAL2, 'ClearVal_1'),
     13: (CollectionType.ContentsClearCount, KEY_VAL2, 'ClearVal_1'),
     31: (CollectionType.AttendanceCount, KEY_NONE, 'ClearVal_1'),
     34: (CollectionType.UnitLevelUp, KEY_VAL1, 'ClearVal_2'),
+    57: (CollectionType.AllUnitLevelUpCount, KEY_ALL, 'ClearVal_1'),
 }
 # Kept for callers that only care about the counter type.
 CLEAR_TO_COLLECTION = {k: v[0] for k, v in CLEAR_RULES.items()}
@@ -116,6 +121,8 @@ def counter(player, mission_row):
     if rule is None:
         return None
     ctype, key_from, _target = rule
+    if key_from == KEY_ALL:
+        return sum(v for t1, _t2, _t3, v in player.collection_items() if t1 == int(ctype))
     t2 = to_int(mission_row.get(key_from), -1) if key_from else -1
     return int(player.get_collection(ctype, t2=t2))
 
@@ -142,7 +149,8 @@ def state(player, mission_row, now=None):
         # A daily or weekly mission starts from wherever the counter stands
         # now.  A lifetime mission starts from zero: "clear stage 1-3" must
         # count a stage the player cleared last month.
-        start = counter(player, mission_row)             if periodic_type(mission_row.get('missionType', 0)) else 0
+        start = (counter(player, mission_row)
+                 if periodic_type(mission_row.get('missionType', 0)) else 0)
         entry = book[mid] = {
             'season': season,
             'start': int(start) if start is not None else 0,
@@ -196,6 +204,42 @@ def infos(player, now=None):
     return [info(player, r, now) for r in periodic() + guide()]
 
 
+# MultiCondition_ClearAny (61) / _ClearAll (62), @0x2278CA4: the client looks
+# the mission up in its own `MissionMultiCondition` table (up to four
+# sub-conditions, each a ClearType and two ClearVals) *and* calls
+# NMUserInfo.GetMissionMultiConditionInfo for an `NGMissionMultiConditionInfo`
+# from the server, which holds one StartCollectionValue per sub-condition.  If
+# the server never sent one, the mission is simply not done (`cbz x0` straight
+# to return false) -- why the four chapter-1 missions of this type could never
+# complete.  Each sub-condition is then scored by ClearMission itself against
+# its own start value; 61 needs any of them (@0x2279808 counts the passes and
+# compares with 0), 62 all of them.
+#
+# The guide's four (100006, 100021, 100022, 100028) are all 64
+# UnitEquipAtSpecificSlot / 65 UnitSpecificAwaken, which read the hero's own
+# equipment and awakening rather than a counter, so their start values cannot
+# matter; they are sent as 0, the lifetime baseline every guide mission uses.
+MULTI_ANY, MULTI_ALL = 61, 62
+
+
+def multi_condition_row(mission_id):
+    return TABLES.row('MissionMultiCondition', 'MissionID', mission_id, source='json')
+
+
+def multi_condition_infos(player):
+    from ..protocol.dto import TYPES
+    out = []
+    for r in guide():
+        if to_int(r.get('ClearType'), -1) not in (MULTI_ANY, MULTI_ALL):
+            continue
+        if multi_condition_row(to_int(r['missionID'])) is None:
+            continue
+        out.append(TYPES['NGMissionMultiConditionInfo'](
+            ID=to_int(r['missionID']), StartCollectionValue1=0, StartCollectionValue2=0,
+            StartCollectionValue3=0, StartCollectionValue4=0))
+    return out
+
+
 def touch(player, now=None):
     """Create this period's state for every mission that goes out at login.
 
@@ -237,6 +281,9 @@ def record_unit_level(player, unit):
 #                               >= ClearVal_1 -- no baseline subtracted
 #   56 AwakenPartsSlotIDMission @0x22794B0  GetKey(43, partsID), or the sum
 #                               of type 43 when ClearVal_1 is -1 >= ClearVal_2
+#   33 CheckCompleteMissionID   @0x227900C -> NMMission.CheckCompleteMissionIDClear
+#                               @0x1F4DDE8: the mission named in ClearVal_1 has
+#                               IsReceived set.  No counter; already sent.
 #
 # 64 UnitEquipAtSpecificSlot and 65 UnitSpecificAwaken read no counter at all:
 # they call into NMUserInfo and check the hero's own equipment and awakening,
@@ -273,6 +320,34 @@ def record_scenecard(player, card_id):
                           t2=scenecards.grade_of(card_id))
 
 
+def record_unit_level_up(player, unit, levels=1):
+    """AllUnitLevelUpCount: one per level a hero gains, keyed by hero id.
+
+    INFERRED: that one level is one "Level Up Hero", and the key.  The client
+    only ever reads the sum over every key (TotalUnitLevelUpMission), so the
+    key cannot change a result; 30001 raises exactly one level per request.
+    """
+    player.add_collection(CollectionType.AllUnitLevelUpCount, int(levels),
+                          t2=int(unit['id']))
+
+
+def record_item_grade_up(player, count=1):
+    """ItemGradeUpCount: one per equipment upgrade that succeeded.  INFERRED
+    that a failed fusion -- which still eats the materials -- does not count."""
+    if int(count) > 0:
+        player.add_collection(CollectionType.ItemGradeUpCount, int(count))
+
+
+def record_artifact(player, artifact_id):
+    """ArtifactGradeGetCount, keyed by grade.  Type 16 is read like relics'
+    type 15, @0x2278B8C: GetKey(16, ClearVal_2), or the sum of type 16 when
+    ClearVal_2 is -1, >= ClearVal_1.  INFERRED, as for relics: any artifact
+    obtained counts, not only one crafted at the Forge."""
+    from . import artifacts
+    player.add_collection(CollectionType.ArtifactGradeGetCount, 1,
+                          t2=artifacts.grade_of(artifact_id))
+
+
 def _raise_to(player, ctype, value, t2=-1, t3=-1):
     """Backfill never lowers a counter -- they only ever go up in the game."""
     if int(value) > player.get_collection(ctype, t2=t2, t3=t3):
@@ -282,13 +357,25 @@ def _raise_to(player, ctype, value, t2=-1, t3=-1):
 def backfill(player):
     """Counters the server only started keeping now, rebuilt from the save so
     progress made before this change still counts.  Idempotent."""
-    from . import scenecards
-    nodes, grades = {}, {}
+    from . import scenecards, artifacts
+    nodes, grades, levels = {}, {}, {}
     for unit in player.d.get('units', []):
         record_unit_level(player, unit)
         record_unit_grade(player, unit)
+        uid = int(unit['id'])
+        # Every level above 1 is a level-up that happened.  INFERRED for levels
+        # set from the dashboard, which count too.
+        levels[uid] = levels.get(uid, 0) + max(0, int(unit.get('level', 1)) - 1)
         for node in (unit.get('awaken') or []):
             nodes[int(node)] = nodes.get(int(node), 0) + 1
+    for uid, n in levels.items():
+        _raise_to(player, CollectionType.AllUnitLevelUpCount, n, t2=uid)
+    art_grades = {}
+    for a in player.d.get('artifacts', []):
+        g = artifacts.grade_of(a['id'])
+        art_grades[g] = art_grades.get(g, 0) + 1
+    for g, n in art_grades.items():
+        _raise_to(player, CollectionType.ArtifactGradeGetCount, n, t2=g)
     for node, n in nodes.items():
         _raise_to(player, CollectionType.AwakenPartsSlotOpenCount, n, t2=node)
     for relic in player.d.get('scenecards', []):

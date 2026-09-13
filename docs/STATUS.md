@@ -1232,3 +1232,47 @@ from ~8 MB (LZ4HC) to ~30 MB.
 
 `server/skill-builder/tests/test_skill_builder.py`, 53 checks, runs the whole
 thing against the real client files in a temp sandbox.
+
+## Fourteenth pass: the rest of the Guide Mission this server can support
+
+Merged first: `ChangeNickNameReq` (30110) from Yukioooh's PR #1.
+
+More of `MissionInfo.ClearMission`'s jump table (0x3C745B4) decoded, for the
+guide missions that were still stuck:
+
+| ClearType | reads | target | missions |
+|---|---|---|---|
+| 3 ItemUpgrade | GetKey(2 ItemGradeUpCount) | ClearVal_1 | 1 |
+| 16 ArtifactGradeGetCount | GetKey(16, ClearVal_2), or the sum when -1 | ClearVal_1 | 1 |
+| 28 UseResourceType1 | GetKey(26 ResourceUseValue, ClearVal_1) | ClearVal_2 | 4 (content not implemented) |
+| 33 CheckCompleteMissionID | `NMMission.CheckCompleteMissionIDClear` @0x1F4DDE8: mission ClearVal_1 is received | -- | 2 (already worked) |
+| 57 TotalUnitLevelUpMission | sum of 52 AllUnitLevelUpCount | ClearVal_1 | 4 |
+| 61 MultiCondition_ClearAny | see below | -- | 4 |
+| 71 ArtifactLvUpCount | `CheckArtifactLVUpCount` @0x1F4C1F0: GetKey(59, ClearVal_1), or GetKey(59) when -1 | ClearVal_2 | 1 (blocked) |
+| 72 ArtifactMaxLvUpCount | `CheckArtifactMaxLVUpCount` @0x1F4C418: GetKey(59, grade, 7) | ClearVal_2 | 1 (blocked) |
+
+**MultiCondition (61/62)** was the interesting one. The client needs *two*
+things: its own `MissionMultiCondition` row (up to four ClearType + ClearVals)
+and an `NGMissionMultiConditionInfo` from the server with a start value per
+sub-condition. With no server record the mission is "not done", full stop.
+That record goes out in `NGLogInAck02.vecMissionMultiConditionInfo`; the
+guide's four are equip/awaken checks on Crusade Mira Yoo (types 64/65), which
+read the hero's gear rather than counters, so their start values are 0.
+
+New counters: ItemGradeUpCount (successful equipment upgrades), AllUnitLevelUpCount
+(one per hero level), ArtifactGradeGetCount (by grade). The login backfill
+rebuilds the last two from the save. INFERRED and flagged: a failed fusion does
+not count; one level is one "Level Up Hero"; any artifact obtained counts for
+"Craft Artifact", same as relics.
+
+**90 of 147 guide missions can complete now.** The twelfth pass said 103; that
+was a miscount -- mission by mission it was 80. The other 57 all need content
+that isn't here: Advent Boss (18), Hero Dungeon (10), Trial Tower (7),
+resource spending (4: three Trial Tower, one Essence of Dimension), Chaos
+Crack (4), Dimension Gap and its boxes (1 + 3),
+equipment summons (2), request quests (2), Heart Heater's Quest House (2),
+World Raid (1), Other World Boss (1), and real artifact enhancing (2 --
+levelling here only adds MaterialEXP and never raises EnchantLevel). Every
+chapter still has at least one, so **no chapter's final reward is reachable yet.**
+
+`tools/test_mail_guide.py` now 58 checks.

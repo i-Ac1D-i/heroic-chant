@@ -94,8 +94,11 @@ async def login(s, a):
 
     await s.send(40000, _ack01(player))
     # The Guide Mission's chapters, and whether each final reward is claimed.
+    # vecMissionMultiConditionInfo: without one a MultiCondition mission can
+    # never complete on the client -- see missions.multi_condition_infos.
     await s.send(40001, TYPES['NGLogInAck02'](
-        vecUserGuideMissionChapter=guide.infos(player)))
+        vecUserGuideMissionChapter=guide.infos(player),
+        vecMissionMultiConditionInfo=missions.multi_condition_infos(player)))
     # vecAwakenStat is the account's claimed Awakening Passive Mastery stats.
     # Without it every one of them reads as unclaimed after a relogin, and
     # rank-up -- which is gated on the stat, not on the star count -- locks

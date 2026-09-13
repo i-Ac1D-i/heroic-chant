@@ -50,6 +50,7 @@ async def unit_level_up(s, a):
         return
     u['level'] = target
     missions.record_unit_level(p, u)     # Guide Mission: "reach level N with X"
+    missions.record_unit_level_up(p, u)  # Guide Mission: "Level Up Hero N times"
     p.save()
     await s.send(40006, Err.OK, state.resource_sync(p, vecChangeUnitInfo=state.unit_infos(p, [u])))
 

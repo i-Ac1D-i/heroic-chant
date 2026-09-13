@@ -4,7 +4,7 @@ import random
 
 from ..net import handler
 from ..data.tables import to_int
-from ..game import state, equipment, artifacts, scenecards
+from ..game import state, equipment, artifacts, scenecards, missions
 from ..game.errors import Err
 from ..game.enums import ResourceType
 
@@ -198,6 +198,7 @@ async def item_grade_up(s, a):
         else:
             failed += 1
 
+    missions.record_item_grade_up(p, made)       # Guide: "Upgrade Equipment"
     p.save()
     log.info('item %s upgrade: %d made, %d failed', item_id, made, failed)
     await s.send(40018, Err.OK if (made or failed) else Err.NOT_ENOUGH,
@@ -244,6 +245,7 @@ async def equip_item_grade_up(s, a):
         return
     p.add_resource(equipment.ITEM, -recipe['count'], recipe['material'])
     worn[str(slot)] = recipe['result']
+    missions.record_item_grade_up(p)             # Guide: "Upgrade Equipment"
     p.save()
     log.info('unit %s slot %d upgraded %d -> %d', unit['uid'], slot, cur, recipe['result'])
     await s.send(40071, Err.OK, state.resource_sync(
