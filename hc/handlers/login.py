@@ -28,11 +28,12 @@ def _ack01(player):
         vecCommanderInfo=commanders,
         IsJoin=True,
         RepresentProfile=player.d['represent_profile'],
+        vecUserAllFrames=state.frame_infos(player),
         vecTutorialID=player.d.get('tutorials', []),
         vecDimensionGacha=gacha.dimension_gacha(player),
         ngGuildMember=guild.guild_member_dto(player),
         vecAchievementComplete=[],
-        WallPaperID=0,
+        WallPaperID=player.d.get('wallpaper_id', 0),
         TeamType=0,
         # The client opens a second connection for PvP; point it back at us so
         # it never tries to reach the dead retail match servers.
