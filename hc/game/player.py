@@ -284,19 +284,31 @@ class Player(object):
              'tier': tier, 'grade': grade, 'rareness': max(int(rareness), 0),
              'reg_date': datetime.utcnow().isoformat(timespec='seconds')}
         self.d['units'].append(u)
-        # NMUnit.GetProfileList (the "Change Main Hero" picker) filters its
-        # candidates through GetResourceLongValue(ResourceType.Profile=43,
-        # UnitID, -1) >= 1 -- a per-hero reward from `representProfile`
-        # (UnitID -> (43, UnitID, -1) = 1), unrelated to the roster itself.
-        # Nothing granted it before, so the picker was always empty no matter
-        # how many heroes were owned.
+        self._grant_represent_profile(unit_id)
+        return u
+
+    def _grant_represent_profile(self, unit_id):
+        """NMUnit.GetProfileList (the "Change Main Hero" picker) filters its
+        candidates through GetResourceLongValue(ResourceType.Profile=43,
+        UnitID, -1) >= 1 -- a per-hero reward from `representProfile`
+        (UnitID -> (43, UnitID, -1) = 1), unrelated to the roster itself."""
         pr_row = TABLES.row('representProfile', 'UnitID', unit_id)
         if pr_row:
             self.add_resource(to_int(pr_row['ResourceType1']),
                                to_int(pr_row['ResourceVal1'], 0),
                                to_int(pr_row['ResourceType2']),
                                to_int(pr_row['ResourceType3']))
-        return u
+
+    def backfill_represent_profiles(self):
+        """`_grant_represent_profile` only ever ran at the moment a unit was
+        added, so every save from before it existed has heroes with no Profile
+        resource at all -- the picker showed none of them, not just some,
+        exactly as if the account had no roster. Idempotent: only tops up a
+        unit actually missing the resource, so re-running costs nothing."""
+        for unit in self.d.get('units', []):
+            unit_id = int(unit['id'])
+            if self.get_resource(ResourceType.Profile, unit_id, -1) < 1:
+                self._grant_represent_profile(unit_id)
 
     # -- parties -----------------------------------------------------------
     # Every party the player has -- story, arena attack, guild war and the

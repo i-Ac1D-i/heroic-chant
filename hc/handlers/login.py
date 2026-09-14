@@ -87,6 +87,9 @@ async def login(s, a):
     missions.touch(player)
     missions.record_login(player)
     missions.backfill(player)
+    # Heroes owned since before the Change Main Hero feature existed never
+    # got the Profile resource add_unit now grants on the way in.
+    player.backfill_represent_profiles()
     player.save()
     s.account, s.player = account_id, player
 
