@@ -1,24 +1,3 @@
-"""Achievements: lifetime thresholds, claimed once each for a reward.
-
-NMMissionAchievement.GetAchievementInfo() loads achievementList rows into a
-plain MissionInfo, so a claim runs through the same MissionInfo.ClearMission
-jump table missions use. Three ClearTypes cover every row here, read off that
-jump table directly rather than guessed:
-
-  ClearType 7  -> NMUserInfo.GetResourceLongValue(110)          wallet balance of resource 110
-  ClearType 8  -> NMUserInfo.GetCollectionTypeAllValue(9)        CollectionType 9 (GachaOpenCount), summed
-  ClearType 19 -> NMUserInfo.GetCollectionValue(GetKey(18))      CollectionType 18 (TagArenaTierUpCount)
-
-As elsewhere in this project, MissionClearType and CollectionType are
-different enums and the numbers next to each other above are a coincidence,
-not a correspondence.
-
-Resource 110 is never paid out anywhere on this server, so the 155
-achievementType-2 rows can never complete yet. CollectionType 18 only moves
-by playing Tag Arena, which isn't implemented, so the 31 achievementType-4
-rows can't complete either. achievementType-3 (GachaOpenCount) already works,
-since gacha pulls are tracked for the Guide Mission.
-"""
 from ..data.tables import TABLES, to_int
 from .enums import CollectionType
 
