@@ -91,6 +91,9 @@ def main():
     if not args.no_reverse:
         adb(adb_bin, serial, 'reverse', '--remove-all', timeout=30)
         adb(adb_bin, serial, 'reverse', 'tcp:80', 'tcp:%d' % args.http_port, timeout=30)
+        if args.http_port != 80:
+            adb(adb_bin, serial, 'reverse', 'tcp:%d' % args.http_port,
+                'tcp:%d' % args.http_port, timeout=30)
         adb(adb_bin, serial, 'reverse', 'tcp:%d' % args.port,
             'tcp:%d' % args.port, timeout=30)
         print('reverse: %s' % adb(adb_bin, serial, 'reverse', '--list',

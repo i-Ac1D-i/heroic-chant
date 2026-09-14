@@ -10,14 +10,13 @@ from ..game import (state, gacha, guild, shop, artifacts, scenecards, missions,
 from ..game.errors import Err
 from ..game.player import Player
 from .center import account_for_device
+from .dungeon import open_enables
 
 log = logging.getLogger('hc.login')
 
 
 def _ack01(player):
     now = datetime.utcnow()
-    commanders = [TYPES['NGCommanderInfo'](ID=c['id'], Level=c['level'], Tier=c['tier'])
-                  for c in player.d.get('commanders', [])]
     return TYPES['NGLogInAck01'](
         Error=0,
         Nickname=player.nickname,
@@ -26,7 +25,9 @@ def _ack01(player):
         PurchaseAgeLimit=now,
         LastLoginDate=now,
         RegDate=state._dt(player.d['reg_date']),
-        vecCommanderInfo=commanders,
+        vecCommanderInfo=state.commander_infos(player),
+        vecAddCommandersInfo=state.commanders_infos(player),
+        CommandCenterInfo=state.command_center_info(player),
         IsJoin=True,
         RepresentProfile=player.d['represent_profile'],
         vecUserAllFrames=state.frame_infos(player),
@@ -109,7 +110,8 @@ async def login(s, a):
     # itself again.
     await s.send(40002, TYPES['NGLogInAck03'](
         vecAwakenStat=[TYPES['NGAwakenStat'](AwakenStatID=int(sid), State=1)
-                       for sid in player.awaken_stats()]))
+                       for sid in player.awaken_stats()],
+        vecDungeonOpenEnable=open_enables(player)))
     await s.send(40003, TYPES['NGLogInAck04'](customStringData=''))
     shop_info, shop_goods_info, count_price = shop.shop_tables()
     await s.send(40004, TYPES['NGLogInAck05'](

@@ -189,7 +189,9 @@ class Player(object):
             'cleared': {},          # dungeon_id -> star flag bitmask
             'collections': {},      # "t1:t2:t3" -> counter (see CollectionType)
             'tutorials': list(range(1, 200)),   # skip the tutorial gate
-            'commanders': [{'id': 1, 'level': 1, 'tier': 1}],
+            'commanders': [{'id': 0, 'level': 1, 'tier': 1},
+                           {'id': 1, 'level': 1, 'tier': 1},
+                           {'id': 2, 'level': 1, 'tier': 1}],
             'artifacts': [],     # Artifacts: per-instance, not wallet rows
             'scenecards': [],    # Relics (Scene Cards): likewise
             'forge': {},         # craft slots, keyed by slot index
@@ -335,6 +337,10 @@ class Player(object):
 
     def find_unit(self, uid):
         return next((u for u in self.d['units'] if u['uid'] == int(uid)), None)
+
+    def find_commander(self, commander_id):
+        return next((c for c in self.d.get('commanders', [])
+                     if c['id'] == int(commander_id)), None)
 
     # -- relics (artifacts) ------------------------------------------------
     #

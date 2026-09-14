@@ -92,6 +92,32 @@ def frame_infos(player):
     return out
 
 
+def commander_info(c):
+    return TYPES['NGCommanderInfo'](ID=c['id'], Level=c['level'], Tier=c['tier'])
+
+
+def commander_infos(player):
+    return [commander_info(c) for c in player.d.get('commanders', [])]
+
+
+def commanders_info(c):
+    """NGCommandersInfo, plural - a different DTO from NGCommanderInfo above
+    despite the name. The Command Center button reads its level from this
+    one (NMUserInfo.GetCommandersInfo / vecAddCommandersInfo), not from
+    vecCommanderInfo. Skip it and the button just shows Lv.0 forever, even
+    though the level is correct everywhere else.
+    """
+    return TYPES['NGCommandersInfo'](CommanderID=c['id'], Level=c['level'])
+
+
+def commanders_infos(player):
+    return [commanders_info(c) for c in player.d.get('commanders', [])]
+
+
+def command_center_info(player):
+    return TYPES['NGCommandCenterInfo'](Level=player.d.get('command_center_level', 0))
+
+
 def equip_info(u):
     """NGUnitEquipInfo per occupied slot: gear first, then rune slots.  Both
     ride the same list -- ItemType is the slot, ItemKey what is in it."""

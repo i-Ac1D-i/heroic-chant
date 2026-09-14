@@ -16,6 +16,28 @@ def _autoplay_info(p):
     return TYPES['NGDungeonAutoPlayInfo'](**afk.info_fields(p))
 
 
+def open_enables(player):
+    """Every dungeon this account can see as open: the ones cleared, plus
+    whatever those clears unlock next.
+
+    DungeonEndAck only sends the delta from one clear, so a fresh login never
+    hears about older clears - the open condition on things like Command
+    Center stays unmet even though cleared/collections are correct. Sent at
+    login via NGLogInAck03.vecDungeonOpenEnable.
+    """
+    now = datetime.utcnow()
+    cleared = {int(k) for k in player.d.get('cleared', {})}
+    out = []
+    for row in TABLES.json('dungeonlist'):
+        did = to_int(row['dungeon_ID'])
+        pre = to_int(row.get('preDungeonID'), -1)
+        if did in cleared or pre in cleared:
+            out.append(TYPES['NGDungeonOpenEnable'](
+                ContentsID=to_int(row.get('modeID'), 0), DungeonID=did,
+                OpenEnableTime=now, ClearTime=now))
+    return out
+
+
 @handler(30008)
 async def dungeon_scene_join(s, a):
     await s.send(40013, Err.OK, _autoplay_info(s.player),
