@@ -1,3 +1,3 @@
 """Importing this package registers every C2S handler with hc.net."""
 from . import (center, login, dungeon, units, misc, gacha, shop, equipment,  # noqa: F401
-               guild, arena, scenecards, mail, commander)                # noqa: F401
+               guild, arena, scenecards, mail, commander, achievements)   # noqa: F401

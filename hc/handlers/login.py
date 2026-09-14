@@ -6,7 +6,7 @@ from .. import config
 from ..net import handler
 from ..protocol.dto import TYPES
 from ..game import (state, gacha, guild, shop, artifacts, scenecards, missions,
-                    mail, guide)
+                    mail, guide, achievements)
 from ..game.errors import Err
 from ..game.player import Player
 from .center import account_for_device
@@ -34,7 +34,7 @@ def _ack01(player):
         vecTutorialID=player.d.get('tutorials', []),
         vecDimensionGacha=gacha.dimension_gacha(player),
         ngGuildMember=guild.guild_member_dto(player),
-        vecAchievementComplete=[],
+        vecAchievementComplete=achievements.claimed(player),
         WallPaperID=player.d.get('wallpaper_id', 0),
         TeamType=0,
         # The client opens a second connection for PvP; point it back at us so
