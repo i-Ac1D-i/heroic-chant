@@ -6,7 +6,7 @@ from .. import config
 from ..net import handler
 from ..protocol.dto import TYPES
 from ..game import (state, gacha, guild, shop, artifacts, scenecards, missions,
-                    mail, guide, achievements)
+                    mail, guide, achievements, unit_collections)
 from ..game.errors import Err
 from ..game.player import Player
 from .center import account_for_device
@@ -103,7 +103,8 @@ async def login(s, a):
     # never complete on the client -- see missions.multi_condition_infos.
     await s.send(40001, TYPES['NGLogInAck02'](
         vecUserGuideMissionChapter=guide.infos(player),
-        vecMissionMultiConditionInfo=missions.multi_condition_infos(player)))
+        vecMissionMultiConditionInfo=missions.multi_condition_infos(player),
+        vecUserUnitCollection=unit_collections.infos(player)))
     # vecAwakenStat is the account's claimed Awakening Passive Mastery stats.
     # Without it every one of them reads as unclaimed after a relogin, and
     # rank-up -- which is gated on the stat, not on the star count -- locks

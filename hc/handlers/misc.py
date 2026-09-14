@@ -3,7 +3,7 @@ import logging
 
 from ..net import handler
 from ..protocol.dto import TYPES
-from ..game import state, missions, rewards, guide
+from ..game import state, missions, rewards, guide, unit_collections
 from ..game.errors import Err
 from ..game.enums import NMError, ResourceType
 
@@ -269,3 +269,16 @@ async def get_guide_mission_final_reward(s, a):
     p.save()
     log.info('guide chapter %d final reward -> %s', chapter_id, payout)
     await s.send(40329, Err.OK, guide.info(p, chapter_id), state.resource_sync(p))
+
+
+@handler(30334)
+async def unlock_unit_collection(s, a):
+    p = s.player
+    set_id = a['_id']
+    step = unit_collections.unlock(p, set_id)
+    if step is None:
+        await s.send(40358, Err.INVALID, state.resource_sync(p))
+        return
+    p.save()
+    await s.send(40358, Err.OK, state.resource_sync(
+        p, vecChangeUnitCollection=[unit_collections.info(set_id, step)]))
