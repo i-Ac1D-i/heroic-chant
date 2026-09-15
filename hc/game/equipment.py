@@ -93,6 +93,9 @@ def is_exclusive(item_id):
     return bool(row) and to_int(row.get('itemType'), -1) == EXCLUSIVE_SLOT
 
 
+SKIN_SLOT = 17
+
+
 def exclusive_recipe(item_id):
     """Everything both grade-up modes need, or None at the top of the chain."""
     row = item(item_id)

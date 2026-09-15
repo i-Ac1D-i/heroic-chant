@@ -145,6 +145,18 @@ async def unit_equip_change(s, a):
                 touched[unit['uid']] = unit
             continue
 
+        if slot == equipment.SKIN_SLOT:
+            if key > 0 and p.get_resource(ResourceType.HeroSkin, key) < 1:
+                log.info('unit %s cannot equip skin %d: not owned',
+                         e.UnitUID, key)
+                continue
+            if key > 0:
+                worn[str(slot)] = key
+            else:
+                worn.pop(str(slot), None)
+            touched[unit['uid']] = unit
+            continue
+
         if key > 0 and equipment.CONSUME_ON_EQUIP:
             if p.get_resource(equipment.ITEM, key) < 1:
                 log.info('unit %s cannot equip item %d: none in inventory',
