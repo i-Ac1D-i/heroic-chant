@@ -42,7 +42,16 @@ python tools/extract_assets.py
 ```
 
 That builds the two things that aren't in the repo: the packet definitions and
-the game's data tables. Then:
+the game's data tables. Optionally, the same client files also give you the
+dashboard's icons:
+
+```bash
+python tools/extract_icons.py        # currency/item icons -- icons/
+python tools/extract_hero_icons.py   # hero portraits -- hero_icons/
+```
+
+Both are gitignored, same as `data/` -- skip them and the dashboard still
+works, just without pictures. Then:
 
 ```bash
 python tools/selftest.py     # drives a fake client through the whole stack
@@ -63,8 +72,9 @@ The server comes with a dashboard, on **http://127.0.0.1:8099** whenever it is
 running:
 
 * edit any save -- currencies, items, roster, rank -- with every item shown by
-  its real name and a search box to find one, and **export/import** a save as
-  JSON to move a player to another device
+  its real name and icon (if you ran `extract_icons.py`/`extract_hero_icons.py`)
+  and a search box to find one, and **export/import** a save as JSON to move a
+  player to another device
 * summon rates, summon cost, and what a duplicate hero converts to
 * stage drop multipliers and per-stage overrides
 * what a brand new account starts with
@@ -92,13 +102,42 @@ python tools/make_mobile_bundle.py
 ```
 
 That produces an APK whose baked-in boot URLs point at `127.0.0.1:8080`, plus a
-12 MB data bundle. Install the APK, install Termux, run one setup command, and
-that's it — the game downloads its own assets from the server over loopback,
-into its own folder, exactly the way it did from the real CDN in 2023. Which is
-what removes the root requirement.
+data bundle (a few MB, or up to ~90&nbsp;MB if `icons/`/`hero_icons/` were
+extracted first -- see above). Install the APK, install Termux, run one setup
+command, and that's it — the game downloads its own assets from the server
+over loopback, into its own folder, exactly the way it did from the real CDN
+in 2023. Which is what removes the root requirement.
 
 Building the APK needs a PC once (Android SDK). Playing doesn't.
 [docs/MOBILE.md](docs/MOBILE.md) has the whole thing.
+
+## Updating
+
+If you set this up before 2026-09-15, the dashboard didn't have icons yet --
+here's how to pick that up (and anything else that's landed since) on
+whichever route you used.
+
+**On a PC:**
+
+```bash
+git pull
+python tools/extract_icons.py        # optional -- currency/item icons
+python tools/extract_hero_icons.py   # optional -- hero portraits
+```
+
+Skip the two `extract_*` lines if you don't want dashboard icons; nothing else
+needs them.
+
+**On a phone, no PC:** re-run the exact same setup command you used the first
+time:
+
+```bash
+pkg install -y curl && curl -fsSL https://raw.githubusercontent.com/i-Ac1D-i/heroic-chant/main/tools/termux-setup.sh -o ~/hc-setup.sh && bash ~/hc-setup.sh
+```
+
+It pulls the new server code, then checks for the dashboard icons separately
+from everything else and fetches them if they're missing -- your save is
+untouched either way. `~/heroic-chant/start.sh` after that, same as always.
 
 ## How it works
 

@@ -24,30 +24,37 @@
   header .status { color:var(--dim); font-size:12px; font-family:var(--mono); }
   nav { display:flex; gap:4px; flex-wrap:wrap; }
   nav button { background:transparent; border:1px solid transparent; color:var(--dim);
-               padding:6px 12px; border-radius:7px; cursor:pointer; font-size:13px; }
+               padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; }
   nav button:hover { color:var(--ink); background:var(--panel2); }
-  nav button.on { background:var(--accent); border-color:var(--accent); color:#0d1020; font-weight:600; }
+  nav button.on { background:var(--panel2); border-color:var(--line); color:var(--ink); font-weight:600;
+                  box-shadow:inset 0 -2px 0 var(--accent); }
   main { padding:16px; max-width:1100px; margin:0 auto; }
   section { display:none; }
   section.on { display:block; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:6px;
           padding:14px 16px; margin-bottom:14px; }
-  .card h2 { font-size:13px; margin:0 0 4px; text-transform:uppercase;
-             letter-spacing:.6px; color:var(--dim); font-weight:650; }
-  .card p.help { margin:0 0 12px; color:var(--dim); font-size:12.5px; }
+  .card > h2 { font-size:13px; margin:0 0 4px; text-transform:uppercase;
+             letter-spacing:.6px; color:var(--dim); font-weight:650;
+             cursor:pointer; user-select:none; display:flex; align-items:center; gap:6px; }
+  .card > h2::before { content:'\25be'; font-size:10px; display:inline-block;
+                        transition:transform .15s; }
+  .card.collapsed > h2 { margin-bottom:0; }
+  .card.collapsed > h2::before { transform:rotate(-90deg); }
+  .card.collapsed > h2 ~ * { display:none; }
+  .card p.help { margin:0 0 10px; color:var(--dim); font-size:12px; }
   label { display:block; font-size:12px; color:var(--dim); margin-bottom:3px; }
   input, select, textarea { width:100%; background:var(--panel2); color:var(--ink);
-    border:1px solid var(--line); border-radius:7px; padding:7px 9px;
+    border:1px solid var(--line); border-radius:4px; padding:7px 9px;
     font:inherit; }
   textarea { font-family:var(--mono); font-size:12px; min-height:150px; resize:vertical; }
   input:focus, select:focus, textarea:focus { outline:2px solid var(--accent); outline-offset:-1px; }
   .row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:10px; }
   .row > div { flex:1 1 150px; min-width:0; }
-  button.act { background:var(--accent); color:#0d1020; border:none; border-radius:7px;
+  button.act { background:var(--accent); color:#0d1020; border:none; border-radius:4px;
                padding:8px 14px; font:inherit; font-weight:600; cursor:pointer; }
   button.act:hover { filter:brightness(1.08); }
   button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line);
-                 border-radius:7px; padding:8px 14px; font:inherit; cursor:pointer; }
+                 border-radius:4px; padding:8px 14px; font:inherit; cursor:pointer; }
   button.ghost:hover { background:var(--panel2); }
   button.danger { border-color:var(--bad); color:var(--bad); }
   .tablewrap { overflow-x:auto; }
@@ -56,17 +63,43 @@
            white-space:nowrap; }
   th { color:var(--dim); font-size:11.5px; text-transform:uppercase; letter-spacing:.5px; }
   tr.pick:hover td { background:var(--panel2); cursor:pointer; }
-  tr.sel td { background:color-mix(in srgb, var(--accent) 18%, transparent); }
+  tr.sel td { background:var(--panel2); box-shadow:inset 2px 0 0 var(--accent); }
   code, .mono { font-family:var(--mono); font-size:12px; }
   .pill { display:inline-block; background:var(--panel2); border:1px solid var(--line);
-          border-radius:20px; padding:1px 9px; font-size:11.5px; font-family:var(--mono); }
+          border-radius:4px; padding:1px 7px; font-size:11.5px; font-family:var(--mono); }
   #toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%);
            background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--good);
-           border-radius:8px; padding:10px 16px; box-shadow:0 8px 26px #0006;
+           border-radius:4px; padding:10px 16px; box-shadow:0 4px 16px #0004;
            opacity:0; pointer-events:none; transition:opacity .18s; max-width:90vw; }
   #toast.show { opacity:1; }
   #toast.err { border-left-color:var(--bad); }
   .grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; }
+  .icon { width:22px; height:22px; object-fit:contain; border-radius:3px;
+          background:var(--panel2); flex:0 0 auto; vertical-align:middle; }
+  .res-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(132px,1fr));
+              gap:8px; margin-top:4px; }
+  .res-tile { background:var(--panel2); border:1px solid var(--line); border-radius:6px;
+              padding:10px 8px; display:flex; flex-direction:column; align-items:center;
+              gap:6px; text-align:center; }
+  .res-tile.empty { opacity:.6; }
+  .res-tile.empty:hover { opacity:1; }
+  .res-tile .icon { width:44px; height:44px; border-radius:4px; }
+  .res-tile .name { font-size:12px; line-height:1.25; max-height:2.5em; overflow:hidden;
+                     text-overflow:ellipsis; }
+  .res-tile input { text-align:center; padding:5px 4px; font-size:12.5px; width:100%; }
+  .res-empty { grid-column:1/-1; color:var(--dim); padding:8px 2px; }
+  .hero-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(92px,1fr));
+               gap:8px; margin-top:4px; }
+  .hero-tile { position:relative; border-radius:6px; overflow:hidden; cursor:pointer;
+               border:2px solid transparent; background:var(--panel2); }
+  .hero-tile.sel { border-color:var(--accent); }
+  .hero-tile .portrait { width:100%; aspect-ratio:3/4; object-fit:cover; object-position:top center;
+                          display:block; background:var(--panel2); }
+  .hero-tile .name { font-size:11px; padding:4px 5px; line-height:1.2; text-align:center;
+                      overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .hero-tile .check { position:absolute; top:5px; left:5px; width:auto; }
+  .hero-tile .badge { position:absolute; top:4px; right:4px; background:var(--good);
+                       color:#0d1020; font-size:9.5px; font-weight:700; padding:1px 5px; border-radius:3px; }
   .muted { color:var(--dim); }
   .right { text-align:right; }
   details summary { cursor:pointer; color:var(--dim); font-size:12.5px; }
@@ -94,8 +127,6 @@
 <section id="accounts" class="on">
   <div class="card">
     <h2>Accounts</h2>
-    <p class="help">One save per account. Pick one to edit its wallet and roster,
-      or export it to move to another device.</p>
     <div class="tablewrap">
       <table id="acctTable">
         <thead><tr><th>ID</th><th>Name</th><th>Heroes</th><th>Wallet rows</th>
@@ -110,82 +141,108 @@
     </div>
   </div>
 
-  <div class="card" id="editor" hidden>
-    <h2>Account <span id="edId" class="pill"></span></h2>
-    <div class="row">
-      <div><label>Nickname</label><input id="edNick"></div>
-      <div><label>Rank EXP</label><input id="edExp" type="number"></div>
-      <div style="flex:0 0 auto">
-        <button class="act" id="saveProfile">Save</button>
-      </div>
-      <div style="flex:0 0 auto">
-        <button class="ghost" id="exportBtn">Export</button>
-      </div>
-      <div style="flex:0 0 auto">
-        <button class="ghost danger" id="deleteBtn">Delete</button>
+  <div id="editor" hidden>
+    <div class="card">
+      <h2>Account <span id="edId" class="pill"></span></h2>
+      <div class="row">
+        <div><label>Nickname</label><input id="edNick"></div>
+        <div><label>Rank EXP</label><input id="edExp" type="number"></div>
+        <div style="flex:0 0 auto">
+          <button class="act" id="saveProfile">Save</button>
+        </div>
+        <div style="flex:0 0 auto">
+          <button class="ghost" id="exportBtn">Export</button>
+        </div>
+        <div style="flex:0 0 auto">
+          <button class="ghost danger" id="deleteBtn">Delete</button>
+        </div>
       </div>
     </div>
 
-    <h2 style="margin-top:16px">Send mail</h2>
-    <p class="help">Arrives in the in-game mailbox without restarting the game —
-      on the player's next action if they are online, at login if not.
-      Attachments are claimed from the mailbox. This is the way to give a
-      <strong>logged-in</strong> account something: edits to the wallet below
-      are overwritten by the game while that account is online.</p>
-    <div class="row">
-      <div style="flex:2 1 220px"><label>Subject</label><input id="mailSubject" placeholder="e.g. A gift"></div>
-      <div style="flex:3 1 280px"><label>Message</label><input id="mailContents" placeholder="Optional"></div>
-      <div><label>Expires after (days)</label><input id="mailDays" type="number" value="30" min="1"></div>
-    </div>
-    <div class="row">
-      <div style="flex:2 1 260px"><label>Attach something — search by name</label>
-        <input id="mailSearch" placeholder="e.g. Gold, Q's Memory" autocomplete="off">
-        <select id="mailPick" size="6" hidden style="margin-top:4px"></select></div>
-      <div><label>Key</label><input id="mailKey" class="mono" placeholder="0:-1:-1"></div>
-      <div><label>Amount</label><input id="mailAmount" type="number" placeholder="0" min="1"></div>
-      <div style="flex:0 0 auto"><button class="ghost" id="mailAttach">Attach</button></div>
-    </div>
-    <div class="row"><div style="flex:1 1 100%" id="mailAttachments" class="muted">No attachments.</div></div>
-    <div class="row">
-      <div style="flex:0 0 auto"><label><input type="checkbox" id="mailAll" style="width:auto"> Send to every account</label></div>
-      <div style="flex:0 0 auto"><button class="act" id="mailSend">Send</button></div>
-      <div style="flex:1 1 200px" id="mailStatus" class="muted"></div>
-    </div>
-    <div class="tablewrap" style="max-height:220px; overflow-y:auto">
-      <table id="mailTable">
-        <thead><tr><th>Subject</th><th>Attachments</th><th>Status</th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-
-    <h2 style="margin-top:16px">Currencies &amp; inventory</h2>
-    <p class="help">Absolute values. Set one to 0 to remove it. Keys are
-      <code>type1:type2:type3</code> — most currencies only use type1.
-      Only reliable while the account is offline — use mail above otherwise.</p>
-    <div class="row">
-      <div><label>Filter what you have</label><input id="resFilter" placeholder="e.g. Memory, Shard, Gold"></div>
-    </div>
-    <div class="row">
-      <div style="flex:2 1 260px"><label>Add something — search by name</label>
-        <input id="resSearch" placeholder="e.g. Bam's Memory" autocomplete="off">
-        <select id="resPick" size="6" hidden style="margin-top:4px"></select></div>
-      <div><label>Key</label><input id="resKey" class="mono" placeholder="0:-1:-1"></div>
-      <div><label>Amount</label><input id="resVal" type="number" placeholder="0"></div>
-      <div style="flex:0 0 auto"><button class="ghost" id="resAdd">Set</button></div>
-    </div>
-    <div class="tablewrap" style="max-height:320px; overflow-y:auto">
-      <table id="resTable">
-        <thead><tr><th>Item</th><th>Key</th><th class="right">Amount</th></tr></thead>
-        <tbody></tbody>
-      </table>
+    <div class="card">
+      <h2>Send mail</h2>
+      <p class="help">Use this for a <strong>logged-in</strong> account — edits to
+        the wallet below are overwritten while the game is online.</p>
+      <div class="row">
+        <div style="flex:2 1 220px"><label>Subject</label><input id="mailSubject" placeholder="e.g. A gift"></div>
+        <div style="flex:3 1 280px"><label>Message</label><input id="mailContents" placeholder="Optional"></div>
+        <div><label>Expires after (days)</label><input id="mailDays" type="number" value="30" min="1"></div>
+      </div>
+      <div class="row">
+        <div style="flex:2 1 260px"><label>Attach something — search by name</label>
+          <input id="mailSearch" placeholder="e.g. Gold, Q's Memory" autocomplete="off">
+          <select id="mailPick" size="6" hidden style="margin-top:4px"></select></div>
+        <div><label>Key</label><input id="mailKey" class="mono" placeholder="0:-1:-1"></div>
+        <div><label>Amount</label><input id="mailAmount" type="number" placeholder="0" min="1"></div>
+        <div style="flex:0 0 auto"><button class="ghost" id="mailAttach">Attach</button></div>
+      </div>
+      <div class="row"><div style="flex:1 1 100%" id="mailAttachments" class="muted">No attachments.</div></div>
+      <div class="row">
+        <div style="flex:0 0 auto"><label><input type="checkbox" id="mailAll" style="width:auto"> Send to every account</label></div>
+        <div style="flex:0 0 auto"><button class="act" id="mailSend">Send</button></div>
+        <div style="flex:1 1 200px" id="mailStatus" class="muted"></div>
+      </div>
+      <div class="tablewrap" style="max-height:220px; overflow-y:auto">
+        <table id="mailTable">
+          <thead><tr><th>Subject</th><th>Attachments</th><th>Status</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </div>
 
-    <h2 style="margin-top:16px">Roster</h2>
-    <div class="row">
-      <div><label>Add hero</label><select id="unitPick"></select></div>
-      <div><label>Level</label><input id="unitLvl" type="number" value="1"></div>
-      <div style="flex:0 0 auto"><button class="ghost" id="unitAdd">Add</button></div>
-      <div class="muted" style="flex:1 1 100%" id="unitCount"></div>
+    <div class="card">
+      <h2>Currencies</h2>
+      <p class="help">Set to 0 to remove. Offline accounts only — use mail above for online ones.</p>
+      <div class="row">
+        <div><label>Search</label><input id="curSearch" placeholder="e.g. Gold, Gem, Mana Crystal" autocomplete="off"></div>
+      </div>
+      <div class="res-grid" id="curGrid"></div>
+    </div>
+
+    <div class="card">
+      <h2>Inventory</h2>
+      <p class="help">Gear, runes, costumes and chests are set like currencies.
+        Relics and Artifacts are owned one at a time, so search adds one copy
+        instead. Pick a category to browse its whole catalogue.</p>
+      <div class="row">
+        <div><label>Category</label>
+          <select id="invCategory">
+            <option value="">All (search only)</option>
+            <option value="5">Items (gear)</option>
+            <option value="6">Runes</option>
+            <option value="153">Costumes</option>
+            <option value="48">Chests</option>
+            <option value="42">Relics</option>
+            <option value="8">Artifacts</option>
+            <option value="137">Accessories</option>
+            <option value="158">Wallpapers</option>
+            <option value="170">Frames</option>
+          </select>
+        </div>
+        <div id="invGradeWrap" hidden><label>Rarity</label>
+          <select id="invGrade">
+            <option value="">All</option>
+            <option value="5">SS</option>
+            <option value="4">S</option>
+            <option value="3">A</option>
+            <option value="2">B</option>
+            <option value="1">C</option>
+          </select>
+        </div>
+        <div style="flex:2 1 220px"><label>Search</label><input id="invSearch" placeholder="e.g. a relic, a chest, a piece of gear" autocomplete="off"></div>
+      </div>
+      <div class="res-grid" id="invGrid"></div>
+    </div>
+
+    <div class="card">
+      <h2>Roster</h2>
+      <div class="row">
+        <div style="flex:0 0 auto"><label><input type="checkbox" id="heroSelectAll" style="width:auto"> Select all</label></div>
+        <div style="flex:0 0 auto"><label><input type="checkbox" id="heroMax" style="width:auto"> Max stats (Lv200 / Tier5 / Grade6 / SSS)</label></div>
+        <div style="flex:0 0 auto"><button class="act" id="heroGive">Give selected</button></div>
+        <div class="muted" style="flex:1 1 200px" id="unitCount"></div>
+      </div>
+      <div class="hero-grid" id="heroGrid"></div>
     </div>
   </div>
 </section>
@@ -422,6 +479,7 @@ const $$ = s => [...document.querySelectorAll(s)];
 const TOKEN = new URLSearchParams(location.search).get('token') || '';
 
 let SET = {}, REF = {units:{}, banners:[]}, ACCT = null, NAMES = {};
+const INVENTORY_T1 = new Set([5, 6, 8, 42, 48, 60, 113, 120, 137, 139, 153, 158, 164, 170]);
 
 function toast(msg, bad) {
   const t = $('#toast');
@@ -497,7 +555,10 @@ async function openAccount(id) {
   $('#edId').textContent = id;
   $('#edNick').value = ACCT.nickname || '';
   $('#edExp').value = ACCT.exp || 0;
-  renderResources(); renderRoster();
+  $('#curSearch').value = ''; $('#invSearch').value = '';
+  $('#invCategory').value = ''; $('#invGrade').value = ''; $('#invGradeWrap').hidden = true;
+  SELECTED_HEROES = new Set(); $('#heroSelectAll').checked = false;
+  renderOwnedCurrencies(); renderOwnedInventory(); renderRoster();
   MAIL_ATTACH = []; renderAttachments(); loadMailbox();
   $('#editor').scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
@@ -586,76 +647,202 @@ $('#mailSend').onclick = async () => {
     MAIL_ATTACH = []; renderAttachments(); loadMailbox();
   } catch (err) { toast(err.message, true); }
 };
-function renderResources() {
-  const filter = $('#resFilter').value.trim().toLowerCase();
-  const tb = $('#resTable tbody');
-  tb.innerHTML = '';
-  const rows = Object.entries(ACCT.resources || {}).sort(
-    (a, b) => parseInt(a[0]) - parseInt(b[0]) || a[0].localeCompare(b[0]));
-  for (const [k, v] of rows) {
-    const name = resName(k);
-    if (filter && !k.includes(filter) && !name.toLowerCase().includes(filter)) continue;
-    const tr = document.createElement('tr');
-    const inp = `<input type="number" value="${v}" data-key="${k}" style="max-width:150px">`;
-    tr.innerHTML = `<td>${name}</td><td class="mono muted">${k}</td><td class="right">${inp}</td>`;
-    tr.querySelector('input').onchange = e => {
-      ACCT.resources[k] = parseInt(e.target.value || '0', 10);
-      pushAccount({resources: {[k]: ACCT.resources[k]}});
-    };
-    tb.appendChild(tr);
-  }
-  if (!tb.children.length) tb.innerHTML = '<tr><td colspan="3" class="muted">Nothing matches.</td></tr>';
+function iconUrl(key) {
+  const [t1, t2] = key.split(':');
+  return '/icons/' + t1 + '_' + t2 + '.png?token=' + encodeURIComponent(TOKEN);
 }
-function renderRoster() {
-  const sel = $('#unitPick');
-  if (!sel.options.length) {
-    const ids = Object.keys(REF.units).sort((a, b) => a - b);
-    sel.innerHTML = ids.map(i => `<option value="${i}">${REF.units[i]} (${i})</option>`).join('');
+function resTile(key, name, value, kind, gradeLabel) {
+  const owned = value != null;
+  const div = document.createElement('div');
+  div.className = 'res-tile' + (owned ? '' : ' empty');
+  div.title = key;
+  const badge = gradeLabel ? `<span class="pill" style="position:absolute; top:4px; right:4px; background:var(--accent); color:#0d1020; border:none">${gradeLabel}</span>` : '';
+  if (badge) div.style.position = 'relative';
+  if (kind === 'relic' || kind === 'artifact') {
+    div.innerHTML = `${badge}<img class="icon" src="${iconUrl(key)}" loading="lazy" onerror="this.style.visibility='hidden'">
+      <div class="name">${name}</div>
+      <div class="muted" style="font-size:11px">${owned ? 'Owned ×' + value : 'Not owned'}</div>
+      <button class="ghost" style="padding:4px 8px; font-size:12px; width:100%">Give one</button>`;
+    div.querySelector('button').onclick = () => giveOne(key, kind);
+    return div;
   }
-  $('#unitCount').textContent = (ACCT.units || []).length + ' heroes on this account';
+  div.innerHTML = `${badge}<img class="icon" src="${iconUrl(key)}" loading="lazy" onerror="this.style.visibility='hidden'">
+    <div class="name">${name}</div>
+    <input type="number" value="${owned ? value : ''}" placeholder="0">`;
+  div.querySelector('input').onchange = e => {
+    const v = parseInt(e.target.value || '0', 10);
+    ACCT.resources[key] = v;
+    pushAccount({resources: {[key]: v}});
+  };
+  return div;
+}
+async function giveOne(key, kind) {
+  const id = parseInt(key.split(':')[1], 10);
+  await pushAccount(kind === 'relic' ? {add_relics: [{id}]} : {add_artifacts: [{id}]});
+  toast('Given');
+  refreshInventory();
+}
+function renderResGrid(gridSel, noteSel, list, hiddenCount) {
+  const grid = $(gridSel);
+  grid.innerHTML = '';
+  if (!list.length) {
+    grid.innerHTML = '<div class="res-empty">Nothing matches.</div>';
+  } else {
+    for (const {key, name, value, kind, gradeLabel} of list) grid.appendChild(resTile(key, name, value, kind, gradeLabel));
+  }
+  let note = $(noteSel);
+  if (!note) {
+    note = document.createElement('div');
+    note.id = noteSel.slice(1);
+    note.className = 'muted';
+    note.style.marginTop = '6px';
+    grid.after(note);
+  }
+  note.textContent = hiddenCount ? hiddenCount + ' resource(s) with no display name hidden from this view.' : '';
+}
+function countBy(list) {
+  const out = {};
+  for (const x of list) out[x.id] = (out[x.id] || 0) + 1;
+  return out;
+}
+function renderOwnedCurrencies() {
+  const rows = Object.entries(ACCT.resources || {})
+    .filter(([key]) => !INVENTORY_T1.has(parseInt(key.split(':')[0], 10)))
+    .sort((a, b) => parseInt(a[0]) - parseInt(b[0]) || a[0].localeCompare(b[0]));
+  const named = rows.filter(([key]) => NAMES[key]);
+  renderResGrid('#curGrid', '#curHiddenNote',
+    named.map(([key, value]) => ({key, name: resName(key), value})), rows.length - named.length);
+}
+function renderOwnedInventory() {
+  const rows = Object.entries(ACCT.resources || {})
+    .filter(([key]) => INVENTORY_T1.has(parseInt(key.split(':')[0], 10)))
+    .sort((a, b) => parseInt(a[0]) - parseInt(b[0]) || a[0].localeCompare(b[0]));
+  const named = rows.filter(([key]) => NAMES[key]);
+  const items = named.map(([key, value]) => ({key, name: resName(key), value}));
+
+  const relicCounts = countBy(ACCT.scenecards || []);
+  const relics = Object.entries(relicCounts).map(([id, count]) => {
+    const key = '42:' + id + ':-1';
+    return {key, name: resName(key), value: count, kind: 'relic'};
+  });
+  const artifactCounts = countBy(ACCT.artifacts || []);
+  const arts = Object.entries(artifactCounts).map(([id, count]) => {
+    const key = '8:' + id + ':-1';
+    return {key, name: resName(key), value: count, kind: 'artifact'};
+  });
+
+  renderResGrid('#invGrid', '#invHiddenNote',
+    [...items, ...relics, ...arts], rows.length - named.length);
+}
+function heroIconUrl(id) {
+  return '/hero_icons/' + id + '.png?token=' + encodeURIComponent(TOKEN);
+}
+let SELECTED_HEROES = new Set();
+function renderRoster() {
+  const owned = {};
+  for (const u of (ACCT.units || [])) owned[u.id] = (owned[u.id] || 0) + 1;
+  const ids = Object.keys(REF.units).map(Number).sort((a, b) => a - b);
+  const grid = $('#heroGrid');
+  grid.innerHTML = ids.map(id => `
+    <div class="hero-tile${SELECTED_HEROES.has(id) ? ' sel' : ''}" data-id="${id}">
+      <input type="checkbox" class="check" ${SELECTED_HEROES.has(id) ? 'checked' : ''}>
+      ${owned[id] ? '<span class="badge">Owned' + (owned[id] > 1 ? ' x' + owned[id] : '') + '</span>' : ''}
+      <img class="portrait" src="${heroIconUrl(id)}" loading="lazy" onerror="this.style.visibility='hidden'">
+      <div class="name">${REF.units[id]}</div>
+    </div>`).join('');
+  grid.querySelectorAll('.hero-tile').forEach(tile => {
+    tile.onclick = e => {
+      if (e.target.tagName !== 'INPUT') e.target.closest('.hero-tile').querySelector('.check').click();
+    };
+    tile.querySelector('.check').onchange = e => {
+      const id = parseInt(tile.dataset.id, 10);
+      if (e.target.checked) SELECTED_HEROES.add(id); else SELECTED_HEROES.delete(id);
+      tile.classList.toggle('sel', e.target.checked);
+      $('#heroSelectAll').checked = SELECTED_HEROES.size === ids.length;
+    };
+  });
+  $('#unitCount').textContent = (ACCT.units || []).length + ' heroes on this account, ' +
+    SELECTED_HEROES.size + ' selected';
 }
 async function pushAccount(patch) {
   const r = await post('/accounts/' + ACCT.account_id, patch);
   ACCT = r.account; NAMES = r.names || NAMES; toast('Saved');
 }
 
-/* Resource picker: the catalogue is 4,650 rows, so it is searched server-side
-   rather than shipped to the browser. */
-let searchTimer = null;
-$('#resSearch').oninput = e => {
-  clearTimeout(searchTimer);
+/* Each search box covers both what the account already has and the full
+   4,650-row catalogue -- searched server-side, merged with current values.
+   Currencies and Inventory each search only their own half (`kind`). */
+let curSearchTimer = null;
+$('#curSearch').oninput = e => {
+  clearTimeout(curSearchTimer);
   const q = e.target.value.trim();
-  const sel = $('#resPick');
-  if (q.length < 2) { sel.hidden = true; return; }
-  searchTimer = setTimeout(async () => {
+  if (!q) { renderOwnedCurrencies(); return; }
+  curSearchTimer = setTimeout(async () => {
     try {
-      const {resources} = await api('/resources?limit=100&q=' + encodeURIComponent(q));
-      sel.innerHTML = resources.map(r =>
-        `<option value="${r.key}">${r.name}  —  ${r.key}</option>`).join('');
-      sel.hidden = !resources.length;
-      if (!resources.length) toast('Nothing matches “' + q + '”', true);
+      const {resources} = await api('/resources?limit=100&kind=currency&q=' + encodeURIComponent(q));
+      renderResGrid('#curGrid', '#curHiddenNote',
+        resources.map(r => ({key: r.key, name: r.name, value: ACCT.resources[r.key]})));
     } catch (err) { toast(err.message, true); }
   }, 220);
 };
-$('#resPick').onchange = e => {
-  $('#resKey').value = e.target.value;
-  const cur = ACCT && ACCT.resources[e.target.value];
-  $('#resVal').value = cur == null ? '' : cur;
-  $('#resVal').focus();
+let invSearchTimer = null;
+function refreshInventory() {
+  clearTimeout(invSearchTimer);
+  const q = $('#invSearch').value.trim();
+  const cat = $('#invCategory').value;
+  const grade = $('#invGrade').value;
+  if (!q && !cat) { renderOwnedInventory(); return; }
+  invSearchTimer = setTimeout(async () => {
+    try {
+      let url = '/resources?limit=300&kind=inventory&q=' + encodeURIComponent(q);
+      if (cat) url += '&t1=' + cat;
+      if (cat === '5' && grade) url += '&grade=' + grade;
+      const {resources} = await api(url);
+      const relicCounts = countBy(ACCT.scenecards || []);
+      const artifactCounts = countBy(ACCT.artifacts || []);
+      renderResGrid('#invGrid', '#invHiddenNote', resources.map(r => {
+        const id = r.key.split(':')[1];
+        if (r.kind === 'relic') return {key: r.key, name: r.name, value: relicCounts[id], kind: 'relic'};
+        if (r.kind === 'artifact') return {key: r.key, name: r.name, value: artifactCounts[id], kind: 'artifact'};
+        return {key: r.key, name: r.name, value: ACCT.resources[r.key], gradeLabel: r.gradeLabel};
+      }));
+    } catch (err) { toast(err.message, true); }
+  }, 220);
+}
+$('#invSearch').oninput = refreshInventory;
+$('#invCategory').onchange = () => {
+  $('#invGradeWrap').hidden = $('#invCategory').value !== '5';
+  if ($('#invCategory').value !== '5') $('#invGrade').value = '';
+  refreshInventory();
 };
+$('#invGrade').onchange = refreshInventory;
 $('#reloadAccts').onclick = () => loadAccounts().then(() => toast('Reloaded'));
-$('#resFilter').oninput = () => ACCT && renderResources();
-$('#resAdd').onclick = async () => {
-  const key = $('#resKey').value.trim();
-  if (!key || !ACCT) return;
-  await pushAccount({resources: {[key]: parseInt($('#resVal').value || '0', 10)}});
-  renderResources();
-};
 $('#saveProfile').onclick = () => pushAccount({
   nickname: $('#edNick').value, exp: parseInt($('#edExp').value || '0', 10)});
-$('#unitAdd').onclick = async () => {
-  await pushAccount({add_units: [{id: parseInt($('#unitPick').value, 10),
-                                  level: parseInt($('#unitLvl').value || '1', 10)}]});
+$('#heroSelectAll').onchange = e => {
+  const ids = Object.keys(REF.units).map(Number);
+  SELECTED_HEROES = e.target.checked ? new Set(ids) : new Set();
+  renderRoster();
+};
+$('#heroGive').onclick = async () => {
+  if (!SELECTED_HEROES.size) { toast('Select at least one hero', true); return; }
+  const max = $('#heroMax').checked;
+  const stats = max ? {level: 200, tier: 5, grade: 6, rareness: 3} : {level: 1};
+  const owned = {};
+  for (const u of (ACCT.units || [])) (owned[u.id] = owned[u.id] || []).push(u.uid);
+  const add_units = [], update_units = [];
+  for (const id of SELECTED_HEROES) {
+    if (owned[id]) {
+      if (max) for (const uid of owned[id]) update_units.push({uid, ...stats});
+    } else {
+      add_units.push({id, ...stats});
+    }
+  }
+  if (!add_units.length && !update_units.length) {
+    toast('Nothing to do -- selected heroes are already owned (tick Max stats to update them)', true);
+    return;
+  }
+  await pushAccount({add_units, update_units});
   renderRoster();
 };
 $('#exportBtn').onclick = () => {
@@ -1071,10 +1258,42 @@ $('#resetAll').onclick = async () => {
   renderAll(); toast('Back to defaults');
 };
 
+/* Cards collapse by clicking their title -- state remembered per browser so
+   a long page (the account editor especially) does not need re-collapsing
+   on every reload. */
+function cardKey(card) {
+  // Only the heading's own text, not a nested dynamic span (e.g. the account
+  // id pill) -- so the key stays stable across accounts.
+  const h2 = card.querySelector('h2');
+  let text = '';
+  h2.childNodes.forEach(n => { if (n.nodeType === 3) text += n.textContent; });
+  return text.trim();
+}
+function loadCollapsed() {
+  try { return new Set(JSON.parse(localStorage.getItem('hc-collapsed') || '[]')); }
+  catch { return new Set(); }
+}
+function setupCollapsibleCards() {
+  const collapsed = loadCollapsed();
+  document.querySelectorAll('.card').forEach(card => {
+    const h2 = card.querySelector('h2');
+    if (!h2) return;
+    if (collapsed.has(cardKey(card))) card.classList.add('collapsed');
+    h2.onclick = () => {
+      card.classList.toggle('collapsed');
+      const now = loadCollapsed();
+      const key = cardKey(card);
+      if (card.classList.contains('collapsed')) now.add(key); else now.delete(key);
+      try { localStorage.setItem('hc-collapsed', JSON.stringify([...now])); } catch {}
+    };
+  });
+}
+
 /* --------------------------------------------------------------- boot --- */
 function renderAll() { renderGacha(); renderRewards(); renderNew(); renderArenaSettings(); renderRaw(); }
 (async function () {
   try {
+    setupCollapsibleCards();
     const st = await api('/status');
     $('#status').textContent = `client ${st.version} · ${st.public_host}:${st.game_port} · `
       + `${st.accounts} account${st.accounts === 1 ? '' : 's'} · ${st.devices} device${st.devices === 1 ? '' : 's'}`;

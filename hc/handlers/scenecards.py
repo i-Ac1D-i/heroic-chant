@@ -26,7 +26,7 @@ from datetime import datetime
 
 from ..net import handler
 from ..data.tables import to_int
-from ..game import state, scenecards, rewards
+from ..game import state, scenecards, rewards, artifacts
 from ..game.errors import Err
 
 log = logging.getLogger('hc.relic')
@@ -95,7 +95,7 @@ async def scenecard_manufacture(s, a):
                      state.resource_sync(p))
         return
     pending = p.forge_slot(slot_index)
-    if pending.get('card'):
+    if pending.get('card') or pending.get('artifact'):
         # "Craft is already in progress in this slot.(-457)"
         log.info('craft slot %d is already busy', slot_index)
         await s.send(40171, Err.INVALID, _slot_ack(p, slot_index),
@@ -178,7 +178,7 @@ async def scenecard_slot_immediate(s, a):
     p = s.player
     slot_index = int(a['_SlotIndex'])
     pending = p.forge_slot(slot_index)
-    if not pending.get('card'):
+    if not pending.get('card') and not pending.get('artifact'):
         log.info('nothing is cooking in craft slot %s', slot_index)
         await s.send(40172, Err.INVALID, _slot_ack(p, slot_index),
                      state.resource_sync(p))
@@ -192,7 +192,7 @@ async def scenecard_slot_immediate(s, a):
 
 @handler(30157)
 async def scenecard_slot_reward(s, a):
-    """Collect the finished relic.
+    """Collect the finished relic -- or artifact; one slot, two possible crafts.
 
     Refusals are the client's own: "There is no Craft Product as a reward in
     this slot.(-464)" and "The Craft time is not yet complete.(-465)".
@@ -200,7 +200,7 @@ async def scenecard_slot_reward(s, a):
     p = s.player
     slot_index = int(a['_SlotIndex'])
     pending = p.forge_slot(slot_index)
-    if not pending.get('card'):
+    if not pending.get('card') and not pending.get('artifact'):
         await s.send(40173, Err.INVALID, _slot_ack(p, slot_index),
                      state.resource_sync(p))
         return
@@ -209,6 +209,18 @@ async def scenecard_slot_reward(s, a):
                  slot_index, pending.get('end'))
         await s.send(40173, Err.INVALID, _slot_ack(p, slot_index),
                      state.resource_sync(p))
+        return
+
+    if pending.get('artifact'):
+        artifact_id = pending['artifact']
+        made = p.add_artifact(artifact_id)
+        pending.pop('artifact', None)
+        pending.pop('end', None)
+        p.save()
+        log.info('craft slot %d collected: artifact %d (uid %d)',
+                 slot_index, artifact_id, made['uid'])
+        await s.send(40173, Err.OK, _slot_ack(p, slot_index), state.resource_sync(
+            p, vecAddArtifactInfo=[artifacts.info(made)]))
         return
 
     relic = p.add_scenecard(pending['card'])

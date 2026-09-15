@@ -19,7 +19,7 @@ async def get_script_shop_info(s, a):
 @handler(30108)
 async def buy_shop_goods(s, a):
     p = s.player
-    goods_uid, count = a['_GoodsUID'], max(a['_count'], 1)
+    goods_uid, count = a['_GoodsUID'], min(max(a['_count'], 1), 10000)
 
     row = shop.listing(goods_uid)
     if row is None:

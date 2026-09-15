@@ -3,7 +3,7 @@ import logging
 import random
 
 from ..net import handler
-from ..data.tables import to_int
+from ..data.tables import TABLES, to_int
 from ..game import state, equipment, artifacts, scenecards, missions
 from ..game.errors import Err
 from ..game.enums import ResourceType
@@ -186,7 +186,7 @@ async def unit_equip_change(s, a):
 async def item_grade_up(s, a):
     """Fuse `req_itemCount` copies into the next grade, per itemList."""
     p = s.player
-    item_id, times = a['itemID'], max(a['count'], 1)
+    item_id, times = a['itemID'], min(max(a['count'], 1), 10000)
     recipe = equipment.grade_up_recipe(item_id)
     if recipe is None:
         log.info('item %s has no upgrade path', item_id)
@@ -376,6 +376,148 @@ async def artifact_level_up(s, a):
     await s.send(40019, Err.OK, state.resource_sync(
         p, vecChangeArtifactInfo=[artifacts.info(target)],
         vecDelArtifactInfo=removed))
+
+
+@handler(30170)
+async def artifact_manufacture(s, a):
+    """Blacksmith Workshop -- craft a regular Artifact, one of the four Forge
+    slots (shares them, and the cooking timer, with the relic craft above).
+
+    `_vecItemCost` is two gear items paid as the recipe, not a chosen recipe
+    id. `itemList.artifactCreateGroup` on the item that starts that gear's own
+    grade-up chain names the recipe row in `artifactCreateTable` (cost only,
+    no result column), and that same item's `setID` is the pool of artifacts
+    (`artifactListTable.setID`) the craft can produce. Evidence: feeding item
+    1 (setID 1, artifactCreateGroup 1) and item 501 (setID 1, group 1) --
+    group 1 costs 200 Craft KIT in artifactCreateTable, and setID 1 has seven
+    artifactListTable rows, all grade 1, matching the fed gear's own grade.
+    Picked at random from that pool, same as a relic craft's random_pool().
+    """
+    p = s.player
+    slot_index = int(a['_SlotIndex'])
+    items = [(int(getattr(c, 'Type2', -1)), max(int(getattr(c, 'Value1', 0)), 1))
+             for c in (a.get('_vecItemCost') or [])
+             if int(getattr(c, 'Type1', -1)) == equipment.ITEM]
+
+    def _ack(err):
+        return s.send(40186, err, scenecards.slot_info(slot_index, p.forge_slot(slot_index)),
+                       state.resource_sync(p))
+
+    if not p.forge_slot_open(slot_index):
+        log.info('artifact craft slot %s is not open', slot_index)
+        await _ack(Err.INVALID)
+        return
+    pending = p.forge_slot(slot_index)
+    if pending.get('card') or pending.get('artifact'):
+        log.info('craft slot %d is already busy', slot_index)
+        await _ack(Err.INVALID)
+        return
+    if not items:
+        await _ack(Err.INVALID)
+        return
+
+    groups, set_ids = set(), set()
+    for item_id, _count in items:
+        row = TABLES.row('itemList', 'itemID', item_id)
+        group = to_int(row.get('artifactCreateGroup'), -1) if row else -1
+        if group < 0:
+            log.info('item %d has no artifact recipe', item_id)
+            await _ack(Err.INVALID)
+            return
+        groups.add(group)
+        set_ids.add(to_int(row.get('setID'), -1))
+    if len(groups) != 1 or len(set_ids) != 1:
+        log.info('artifact craft materials do not share a recipe: %s', items)
+        await _ack(Err.INVALID)
+        return
+    group, set_id = groups.pop(), set_ids.pop()
+
+    recipe = TABLES.row('artifactCreateTable', 'artifactCreateGroup', group)
+    if recipe is None:
+        await _ack(Err.INVALID)
+        return
+
+    for item_id, count in items:
+        if p.get_resource(equipment.ITEM, item_id) < count:
+            log.info('artifact craft needs %d of item %d', count, item_id)
+            await _ack(Err.NOT_ENOUGH)
+            return
+    kit_type = to_int(recipe.get('Cost_ResourceType_1'), -1)
+    kit_t2 = to_int(recipe.get('Cost_ResourceType_2'), -1)
+    kit_amount = to_int(recipe.get('Cost_ResourceVal_1'), 0)
+    if kit_type >= 0 and p.get_resource(kit_type, kit_t2) < kit_amount:
+        log.info('artifact craft needs %d of resource %d/%d', kit_amount, kit_type, kit_t2)
+        await _ack(Err.NOT_ENOUGH)
+        return
+
+    pool = [to_int(r['artifactID']) for r in TABLES.sql('artifactListTable')
+            if to_int(r.get('setID'), -1) == set_id
+            and to_int(r.get('itemType'), -1) in artifacts.SLOTS]
+    if not pool:
+        log.warning('artifact craft group %d (set %d) has no producible artifacts',
+                    group, set_id)
+        await _ack(Err.INVALID)
+        return
+
+    for item_id, count in items:
+        p.add_resource(equipment.ITEM, -count, item_id)
+    if kit_type >= 0 and kit_amount > 0:
+        p.add_resource(kit_type, -kit_amount, kit_t2)
+
+    result_id = random.choice(pool)
+    pending.update({'artifact': result_id,
+                    'end': scenecards.finish_time().isoformat(timespec='seconds'),
+                    'open': True})
+    p.save()
+    log.info('artifact craft slot %d: group %d set %d -> artifact %d',
+             slot_index, group, set_id, result_id)
+    await _ack(Err.OK)
+
+
+@handler(30186)
+async def boss_artifact_manufacture(s, a):
+    """Boss Artifact Workshop -- craft a boss artifact from `artifactBossCreate`.
+
+    No slot/cooking step here: `BossArtifactManufactureAck` carries no slot
+    info, just Error + the usual state sync, so the craft is immediate.
+    `_selectStat` is not read -- this server does not roll random artifact
+    stats at all (see artifacts.py), so there is nothing for it to pick.
+    """
+    p = s.player
+    create_id = int(a['_BossCreateID'])
+    row = TABLES.row('artifactBossCreate', 'CreateGroup', create_id)
+    if row is None:
+        log.info('no such boss artifact recipe: %s', create_id)
+        await s.send(40202, Err.INVALID, state.resource_sync(p))
+        return
+
+    costs = []
+    for i in (1, 2, 3):
+        t1 = to_int(row.get('Material_%d_Type1' % i), -1)
+        t2 = to_int(row.get('Material_%d_Type2' % i), -1)
+        val = to_int(row.get('Material_%d_Val1' % i), 0)
+        if t1 >= 0 and val > 0:
+            costs.append((t1, t2, val))
+    gold = to_int(row.get('Gold'), 0)
+
+    if (gold and p.get_resource(ResourceType.Gold) < gold) or any(
+            p.get_resource(t1, t2) < v for t1, t2, v in costs):
+        log.info('boss artifact craft %d needs %s + %d gold', create_id, costs, gold)
+        await s.send(40202, Err.NOT_ENOUGH, state.resource_sync(p))
+        return
+
+    for t1, t2, v in costs:
+        p.add_resource(t1, -v, t2)
+    if gold:
+        p.add_resource(ResourceType.Gold, -gold)
+
+    result_id = to_int(row.get('ResultID'), -1)
+    made = p.add_artifact(result_id)
+    p.save()
+    log.info('boss artifact craft %d: made artifact %d (uid %d)',
+             create_id, result_id, made['uid'])
+    await s.send(40202, Err.OK, state.resource_sync(
+        p, vecAddArtifactInfo=[artifacts.info(made)]))
 
 
 # ----------------------------------------------------- exclusive equipment --

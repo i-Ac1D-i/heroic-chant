@@ -101,19 +101,57 @@ def starter_set():
     return ids[:want]
 
 
-def effects(a):
-    """`vecEffectInfo` for one artifact: its table row's flat stat.
+def _enhance_rows(artifact_id):
+    grade = grade_of(artifact_id)
+    return sorted((r for r in TABLES.sql('artifactEnhanceTable')
+                   if to_int(r.get('Grade'), -1) == grade),
+                  key=lambda r: to_int(r.get('Enhance'), 0))
 
-    The real game rolls extra random lines on top (`InitRandStatCount` says how
-    many). Those are not implemented, so an artifact shows only the stat its row
-    defines. The client renders whatever it is sent, so a short list is fine.
+
+def enchant_level(a):
+    """Current EnchantLevel (0-7), derived from accumulated MaterialEXP.
+
+    `artifactEnhanceTable.GradeUpEXP` is the incremental cost of the *next*
+    step, not a cumulative total, so this walks the steps and spends as it
+    goes. `-1` marks the row past the top step.
+    """
+    exp = int(a.get('exp', 0))
+    level, spent = 0, 0
+    for r in _enhance_rows(a['id']):
+        need = to_int(r.get('GradeUpEXP'), -1)
+        if need < 0 or exp - spent < need:
+            break
+        spent += need
+        level = to_int(r['Enhance'], level) + 1
+    return level
+
+
+def effects(a):
+    """`vecEffectInfo` for one artifact: its table row's flat stat, plus
+    whatever `artifactBaseStatAdd` adds for the current EnchantLevel.
+
+    The real game also rolls extra random lines on top (`InitRandStatCount`
+    says how many). Those are not implemented, so an artifact shows only its
+    one main stat. The client renders whatever it is sent, so a short list is
+    fine.
     """
     from ..protocol.dto import TYPES
     row = table(a['id']) or {}
     stat = to_int(row.get('stat_Type'), -1)
     if stat < 0:
         return []
-    value = float(to_int(row.get('stat_Effect'), 0))
+    # stat_Effect is a plain int for some stats and a fraction ("0.063") for
+    # others -- to_int() raises ValueError on the latter and falls back to
+    # its default, so this was silently zero for every fractional stat.
+    value = float(row.get('stat_Effect') or 0)
+    level = enchant_level(a)
+    if level:
+        for r in TABLES.sql('artifactBaseStatAdd'):
+            if (to_int(r.get('Grade'), -1) == grade_of(a['id'])
+                    and to_int(r.get('Enhance'), -1) == level
+                    and to_int(r.get('Stat_Type'), -1) == stat):
+                value += float(r.get('Stat_Effect') or 0)
+                break
     return [TYPES['NGArtifactEffectInfo'](
         ArtifactUID=int(a['uid']), SlotNum=0, StatTypeID=stat,
         StatEffectValue=value, UseUpgradePoint=0)]
@@ -126,7 +164,7 @@ def info(a):
         UID=int(a['uid']), ID=int(a['id']),
         MaterialEXP=int(a.get('exp', 0)),
         UniqueRandEffectID=int(a.get('unique', -1)),
-        EnchantLevel=int(a.get('enchant', 0)),
+        EnchantLevel=enchant_level(a),
         vecEffectInfo=effects(a),
         # This, not the unit's vecEquipInfo, is what the artifact screen reads to
         # decide whether an artifact is worn and by whom.
@@ -142,11 +180,11 @@ def infos(player):
     return [info(a) for a in player.artifacts()]
 
 
-# Levelling: feeding artifacts to an artifact.  `artifactEnhanceTable` is the real
-# curve; until that is read properly, a fed artifact is worth a flat amount of
-# MaterialEXP scaled by its grade, which is monotonic and cannot go backwards.
-FEED_EXP_PER_GRADE = 100
-
-
 def feed_value(a):
-    return FEED_EXP_PER_GRADE * max(1, grade_of(a['id']))
+    """What feeding this artifact to another is worth -- `artifactEnhanceTable`
+    materialEXP for its grade and current EnchantLevel, falling back to a
+    flat amount scaled by grade if that row is missing."""
+    for r in _enhance_rows(a['id']):
+        if to_int(r.get('Enhance'), -1) == enchant_level(a):
+            return to_int(r.get('materialEXP'), 0)
+    return 100 * max(1, grade_of(a['id']))

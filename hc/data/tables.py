@@ -156,6 +156,15 @@ class Tables(object):
     # (ResourceID, Type2, Type3) -> NameID -- and covers all but a handful.
     # itemList and runeList fill the rest in, and unnamed keys fall back to
     # something honest rather than a lie.
+    def _string_name(self, strings, name_id):
+        """`strings[name_id]`, but 0 and below mean "no name was set" here --
+        every one of these tables uses -1 (and itemList/runeList sometimes 0)
+        as the "blank" sentinel, and string id 0 itself happens to hold '123'
+        in the client's own table, which is not a name, just where the blank
+        sentinel landed."""
+        nid = to_int(name_id, -1)
+        return strings.get(nid) if nid > 0 else None
+
     def resource_names(self):
         """(t1, t2, t3) -> display name, built once and cached."""
         if getattr(self, '_res_names', None) is not None:
@@ -163,22 +172,31 @@ class Tables(object):
         strings = self.strings()
         out = {}
         for r in self.json('ResourceTable'):
-            name = strings.get(to_int(r.get('NameID'), -1))
+            name = self._string_name(strings, r.get('NameID'))
             if name:
                 out[(to_int(r.get('ResourceID'), -9), to_int(r.get('Type2'), -1),
                      to_int(r.get('Type3'), -1))] = name
         # Items and runes are keyed by their own id in Type2 and mostly appear
-        # in ResourceTable already; these catch the ones that do not.
-        for row in self.sql('itemList'):
-            key = (5, to_int(row.get('itemID'), -1), -1)
-            if key not in out:
-                name = strings.get(to_int(row.get('nameID'), -1))
-                if name:
-                    out[key] = name
+        # in ResourceTable already; these catch the ones that do not. A blank
+        # nameID here means "same name as the gear chain's first item" --
+        # grade-up stages are not each given their own -- so fall back to
+        # StartItemID's name rather than leaving the row unnamed.
+        item_rows = {to_int(row.get('itemID'), -1): row for row in self.sql('itemList')}
+        for item_id, row in item_rows.items():
+            key = (5, item_id, -1)
+            if key in out:
+                continue
+            name = self._string_name(strings, row.get('nameID'))
+            if not name:
+                start = item_rows.get(to_int(row.get('StartItemID'), -1))
+                if start is not None:
+                    name = self._string_name(strings, start.get('nameID'))
+            if name:
+                out[key] = name
         for row in self.sql('runeList'):
             key = (6, to_int(row.get('runeID'), -1), -1)
             if key not in out:
-                name = strings.get(to_int(row.get('nameID'), -1))
+                name = self._string_name(strings, row.get('nameID'))
                 if name:
                     out[key] = name
         self._res_names = out

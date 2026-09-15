@@ -272,17 +272,24 @@ def infos(player):
 def slot_info(slot_index, pending=None):
     """NGSceneCardSlot -- one forge slot, and whatever is cooking in it.
 
-    `ResultArtifactID` stays 0: the same struct serves the artifact forge,
-    which is a separate feature and not implemented.
+    DimensionBlackSmithSlotUI.UpdateUI @0x1A2DAA4 treats -1 as "nothing here"
+    for both ResultSceneCardID and ResultArtifactID -- 0 reads as a real id, so
+    an empty slot sent as 0 always looked occupied (and then PROGRESS/END was
+    decided purely by tmEndTime, regardless of whether anything was actually
+    cooking). The same struct serves both the relic forge and the artifact
+    forge -- a slot cooks one or the other, never both, so exactly one of
+    ResultSceneCardID/ResultArtifactID is a real id at a time.
     """
     from ..protocol.dto import TYPES
     pending = pending or {}
     end = pending.get('end')
+    card = pending.get('card')
+    artifact = pending.get('artifact')
     return TYPES['NGSceneCardSlot'](
         SlotIndex=int(slot_index),
-        ResultSceneCardID=int(pending.get('card', 0) or 0),
-        ResultArtifactID=0,
-        tmEndTime=_dt(end) if end else datetime(2000, 1, 1))
+        ResultSceneCardID=int(card) if card else -1,
+        ResultArtifactID=int(artifact) if artifact else -1,
+        tmEndTime=_dt(end) if end else datetime(2099, 12, 31))
 
 
 def _dt(value):
@@ -300,7 +307,7 @@ def finish_time():
 
 def ready(pending):
     """Is the craft in this slot collectable yet?"""
-    if not pending or not pending.get('card'):
+    if not pending or not (pending.get('card') or pending.get('artifact')):
         return False
     return datetime.utcnow() >= _dt(pending.get('end'))
 

@@ -35,6 +35,8 @@ log = logging.getLogger('hc.web')
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
 INDEX = os.path.join(os.path.dirname(ACCOUNTS_DIR), 'accounts', 'index.json')
+ICONS = os.path.join(os.path.dirname(ACCOUNTS_DIR), 'icons')
+HERO_ICONS = os.path.join(os.path.dirname(ACCOUNTS_DIR), 'hero_icons')
 
 # A save is a few hundred KB; an import of one should never be more than a few
 # MB. Anything larger is a mistake or an attack, and reading it would block the
@@ -100,14 +102,38 @@ def _key_parts(key):
     return tuple(parts[:3])
 
 
+def _account_name_keys(player_dict):
+    """Every wallet key plus one per owned Relic/Artifact instance -- those
+    are per-uid objects, not resource rows, but share the same name catalogue
+    (resource_names() has an entry for each, keyed by their item id)."""
+    keys = set(player_dict.get('resources', {}))
+    keys.update('42:%d:-1' % r['id'] for r in player_dict.get('scenecards', []))
+    keys.update('8:%d:-1' % a['id'] for a in player_dict.get('artifacts', []))
+    return keys
+
+
 def _name_map(keys):
-    """{wallet key: display name} for exactly the keys asked about."""
+    """{wallet key: display name} for exactly the keys asked about.
+
+    Omits a key when there is no real name for it, rather than falling back
+    to `resource_name()`'s generic "type 43 / 10" -- that string is meant for
+    a log line or an error message, not a label the dashboard shows the user
+    as if it meant something.
+    """
+    names = TABLES.resource_names()
     out = {}
     for key in keys:
-        try:
-            out[key] = TABLES.resource_name(*_key_parts(key))
-        except Exception:
-            out[key] = str(key)
+        t1, t2, t3 = _key_parts(key)
+        found = None
+        for k in ((t1, t2, t3), (t1, t2, -1), (t1, -1, -1)):
+            if k in names:
+                found = ('%s %d' % (names[k], t2)) if k == (t1, -1, -1) and t2 >= 0 else names[k]
+                break
+        if found is None and t1 == 1:
+            row = TABLES.unit(t2) or {}
+            found = TABLES.strings().get(to_int(row.get('NameID'), -1))
+        if found:
+            out[key] = found
     return out
 
 
@@ -139,25 +165,82 @@ def _score(name, key, query):
     return None
 
 
-def _catalogue(query='', limit=200):
+# Type1 values that are owned things (gear, runes, costumes, chests, relics,
+# artifacts) rather than a plain currency balance -- ResourceType names in
+# enums.py: Item(5), Rune(6), Artifact(8), SceneCard(42), ItemRandomBox(48),
+# TimeRewardRandomBox(60), CashBoxReward(113), ItemRandomBoxInven(120),
+# Accessory(137), SelectBox(139), HeroSkin(153), WallPaper(158), Frame(170),
+# StoryTreasureBox(164). Relics (42) and Artifacts (8) are per-instance
+# objects with their own uid -- not stackable wallet rows at all -- so the
+# picker sends them through add_relics/add_artifacts, never through
+# resources; see _patch_account.
+INVENTORY_T1 = {5, 6, 8, 42, 48, 60, 113, 120, 137, 139, 153, 158, 164, 170}
+
+# Type1 1 is a raw hero name (ResourceType.Unit) -- redundant with the Roster
+# tab's own picker, and not a wallet row a player can hold a quantity of, so
+# neither catalogue offers it.
+CATALOGUE_EXCLUDE_T1 = {1}
+
+
+ITEM_T1 = 5     # ResourceType.Item -- gear, the one category with a real rarity
+GRADE_LETTER = {1: 'C', 2: 'B', 3: 'A', 4: 'S', 5: 'SS'}
+
+
+def _catalogue(query='', limit=200, kind=None, only_t1=None, grade=None):
     """Every nameable resource, for the add-a-resource picker.
 
     4,650 rows is too much to push at the browser on every load, so this is a
-    search: the dashboard sends what the user typed.  Best matches first, and
-    the cut to `limit` happens *after* ranking, never before.
+    search: the dashboard sends what the user typed.  An empty query still
+    matches everything (`_score` gives it the weakest rank rather than no
+    rank), so a category with no text is "browse the whole catalogue" -- the
+    cut to `limit` happens *after* ranking, never before.  `kind` ('currency'
+    or 'inventory') restricts which side of INVENTORY_T1 to search; `only_t1`
+    narrows to one exact ResourceType (one Inventory category); `grade`
+    (1-5, `itemList.itemGrade`, gear only) narrows to that rarity and sorts
+    best-first instead of by text relevance -- browsing gear by rarity is not
+    really a search.
     """
     query = (query or '').strip().lower()
+    item_grades = None
+    if only_t1 == ITEM_T1:
+        item_grades = {to_int(r['itemID']): (to_int(r.get('itemGrade'), -1),
+                                             to_int(r.get('viewStar'), 1))
+                       for r in TABLES.sql('itemList')}
+
     scored = []
     for (t1, t2, t3), name in TABLES.resource_names().items():
+        if t1 in CATALOGUE_EXCLUDE_T1:
+            continue
+        if kind == 'currency' and t1 in INVENTORY_T1:
+            continue
+        if kind == 'inventory' and t1 not in INVENTORY_T1:
+            continue
+        if only_t1 is not None and t1 != only_t1:
+            continue
+        item_grade, enhance = item_grades.get(t2, (-1, 1)) if item_grades is not None else (None, None)
+        if grade is not None and item_grade != grade:
+            continue
         key = '%d:%d:%d' % (t1, t2, t3)
         rank = _score(name, key, query)
         if rank is None:
             continue
         # Shorter names first inside a rank: for "q" that puts "Q's Memory"
-        # above "Heart Heater's Quest House Contract".
-        scored.append((rank, len(name), name.lower(), name, key))
-    scored.sort()
-    return [{'key': k, 'name': n} for _, _, _, n, k in scored[:limit]]
+        # above "Heart Heater's Quest House Contract". Browsing gear sorts
+        # best rarity (then best +N) first instead -- rank is meaningless on
+        # an empty query.
+        sort_key = (-item_grade, -enhance, len(name), name.lower(), name, key) if item_grade is not None \
+            else (rank, len(name), name.lower(), name, key)
+        scored.append((sort_key, key, name, item_grade, enhance))
+    scored.sort(key=lambda row: row[0])
+    return [{'key': k, 'name': n,
+             'kind': 'relic' if t1_of(k) == 42 else 'artifact' if t1_of(k) == 8 else 'resource',
+             **({'grade': g, 'gradeLabel': '%s+%d' % (GRADE_LETTER.get(g, ''), e) if e else GRADE_LETTER.get(g, '')}
+                if g is not None else {})}
+            for _, k, n, g, e in scored[:limit]]
+
+
+def t1_of(key):
+    return int(key.split(':')[0])
 
 
 def _gear(query='', slot=-1, limit=100):
@@ -282,6 +365,36 @@ def _unit_names():
     return out
 
 
+def _unit_skin_ids():
+    out = {}
+    try:
+        for row in TABLES.units():
+            uid = to_int(row.get('UnitID'), -1)
+            if uid >= 0:
+                out[uid] = to_int(row.get('Skin_ID'), -1)
+    except Exception:
+        pass
+    return out
+
+
+def _player_hero_names():
+    """Like `_unit_names()`, restricted to the real playable roster -- the
+    other rows in UnitList are bosses, arena bots and the like, which have no
+    portrait sprite and nowhere sensible to appear in the roster picker."""
+    out = {}
+    try:
+        strings = TABLES.strings()
+        for row in TABLES.units():
+            if to_int(row.get('IsPlayerHero')) != 1:
+                continue
+            uid = to_int(row.get('UnitID'), -1)
+            if uid >= 0:
+                out[uid] = strings.get(to_int(row.get('NameID')), str(uid))
+    except Exception:
+        pass
+    return out
+
+
 # ----------------------------------------------------------------- handler --
 class Handler(BaseHTTPRequestHandler):
     server_version = 'HeroicChant'
@@ -339,6 +452,10 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorised(query):
             return self._fail(401, 'bad or missing token')
         try:
+            if path.startswith('/icons/'):
+                return self._icon(path[len('/icons/'):])
+            if path.startswith('/hero_icons/'):
+                return self._hero_icon(path[len('/hero_icons/'):])
             if not path.startswith('/api/'):
                 return self._static(path)
             return self._api(method, path[4:], query)
@@ -360,6 +477,36 @@ class Handler(BaseHTTPRequestHandler):
                      os.path.splitext(full)[1], 'application/octet-stream')
         with open(full, 'rb') as fh:
             self._send(200, fh.read(), ctype)
+
+    def _icon(self, name):
+        m = re.fullmatch(r'(-?\d+)_(-?\d+)\.png', name)
+        if not m:
+            return self._fail(404, 'not found')
+        t1, t2 = m.group(1), m.group(2)
+        if t1 == str(ITEM_T1):
+            # Grade-up stages of the same gear chain share one look --
+            # itemList.viewIMG, not the item's own id, is the real sprite key.
+            row = TABLES.row('itemList', 'itemID', int(t2))
+            if row is not None:
+                t2 = str(to_int(row.get('viewIMG'), int(t2)))
+        for size in ('m', 's'):
+            for key in (t2, '-1'):
+                full = os.path.realpath(os.path.join(ICONS, size, '%s_%s.png' % (t1, key)))
+                if full.startswith(os.path.realpath(ICONS) + os.sep) and os.path.isfile(full):
+                    with open(full, 'rb') as fh:
+                        return self._send(200, fh.read(), 'image/png')
+        return self._fail(404, 'not found')
+
+    def _hero_icon(self, name):
+        m = re.fullmatch(r'(\d+)\.png', name)
+        if not m:
+            return self._fail(404, 'not found')
+        skin_id = _unit_skin_ids().get(int(m.group(1)), -1)
+        full = os.path.realpath(os.path.join(HERO_ICONS, '%d.png' % skin_id))
+        if not full.startswith(os.path.realpath(HERO_ICONS) + os.sep) or not os.path.isfile(full):
+            return self._fail(404, 'not found')
+        with open(full, 'rb') as fh:
+            self._send(200, fh.read(), 'image/png')
 
     # -- the API -----------------------------------------------------------
     def _api(self, method, path, query):
@@ -490,16 +637,21 @@ class Handler(BaseHTTPRequestHandler):
         # ---- reference data, so the UI can show names not just numbers ----
         if path == '/reference' and method == 'GET':
             return self._send(200, {
-                'units': _unit_names(),
+                'units': _player_hero_names(),
                 'banners': sorted({to_int(r.get('GachaID'), -1)
                                    for r in TABLES.sql('GachaList')} - {-1})[:60],
             })
 
         # Searchable resource catalogue for the wallet editor's picker.
         if path == '/resources' and method == 'GET':
+            t1_raw = (query.get('t1') or [None])[0]
+            grade_raw = (query.get('grade') or [None])[0]
             return self._send(200, {
                 'resources': _catalogue((query.get('q') or [''])[0],
-                                        int((query.get('limit') or ['200'])[0]))})
+                                        int((query.get('limit') or ['200'])[0]),
+                                        (query.get('kind') or [None])[0],
+                                        int(t1_raw) if t1_raw not in (None, '') else None,
+                                        int(grade_raw) if grade_raw not in (None, '') else None)})
 
         # Gear for the arena team builder.  Searched rather than sent whole --
         # itemList has 2,526 rows, against 216 relics which do go in /arena.
@@ -523,7 +675,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._fail(404, 'no such account')
                 return self._send(200, {
                     'account': pl.d,
-                    'names': _name_map(pl.d.get('resources', {})),
+                    'names': _name_map(_account_name_keys(pl.d)),
                     'devices': _devices_for(account_id, idx)})
             if method == 'POST':
                 return self._patch_account(account_id)
@@ -650,6 +802,24 @@ class Handler(BaseHTTPRequestHandler):
                 if f in patch:
                     unit[f] = int(patch[f])
 
+        # Relics and Artifacts are per-instance objects with their own uid,
+        # not stackable wallet rows, so "give one" means minting a new
+        # instance -- same shape as add_units, {"id": ..., "count": ...}.
+        for spec in (body.get('add_relics') or []):
+            item_id = spec['id'] if isinstance(spec, dict) else spec
+            count = max(int(spec.get('count', 1)), 1) if isinstance(spec, dict) else 1
+            for _ in range(count):
+                pl.add_scenecard(int(item_id))
+        for uid in (body.get('remove_relics') or []):
+            pl.remove_scenecard(int(uid))
+        for spec in (body.get('add_artifacts') or []):
+            item_id = spec['id'] if isinstance(spec, dict) else spec
+            count = max(int(spec.get('count', 1)), 1) if isinstance(spec, dict) else 1
+            for _ in range(count):
+                pl.add_artifact(int(item_id))
+        for uid in (body.get('remove_artifacts') or []):
+            pl.remove_artifact(int(uid))
+
         # Anything not covered above: a raw merge, so the dashboard is never a
         # narrower editor than a text editor on the same file.
         for key, value in (body.get('raw') or {}).items():
@@ -658,7 +828,7 @@ class Handler(BaseHTTPRequestHandler):
         pl.save()
         log.info('account %d edited via dashboard', account_id)
         return self._send(200, {'account': pl.d,
-                                'names': _name_map(pl.d.get('resources', {}))})
+                                'names': _name_map(_account_name_keys(pl.d))})
 
     def _import_account(self, idx):
         body = self._body()

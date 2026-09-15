@@ -38,7 +38,7 @@ PKG_NAME="com.ngelgames.herocantare"
 : "${HC_DB_ID:=1U3LYz0VUOmfTQcFQe3v7jqJliBxMJ6ci}"
 # spec.json + the JSON tables, from tools/make_mobile_bundle.py --no-db.
 # The phone cannot build these itself, so they have to be hosted.
-: "${HC_DATA_ID:=1Mo2t-jzwaQeq3U2bkFKgmQQghBbLmgdN}"
+: "${HC_DATA_ID:=1SpE48FmNw3n-HBW5R27jQ3Q9Ji3_388v}"
 
 # Smallest size each download can plausibly be. A truncated file still starts
 # with a zip header, so magic bytes alone don't catch a download that died --
@@ -210,8 +210,15 @@ else
     verify "$DB" db "herocantare.db" "$HC_DB_MIN"
 fi
 
-# 3. spec.json + data/ -- generated on a desktop, cannot be built here.
-if [ ! -s "$SERVER/hc/protocol/spec.json" ] || [ ! -d "$SERVER/data" ]; then
+# 3. spec.json + data/ + dashboard icons -- generated on a desktop, cannot be
+# built here. Icons are checked separately from spec/data so a re-run picks
+# them up even when spec.json and data/ were already unpacked by an older
+# version of this script -- same "safe to re-run" contract as everything else.
+NEED_SPEC=0; NEED_ICONS=0
+{ [ -s "$SERVER/hc/protocol/spec.json" ] && [ -d "$SERVER/data" ]; } || NEED_SPEC=1
+{ [ -d "$SERVER/icons" ] && [ -d "$SERVER/hero_icons" ]; } || NEED_ICONS=1
+
+if [ "$NEED_SPEC" = 1 ] || [ "$NEED_ICONS" = 1 ]; then
     DATA_ZIP="$BASE/heroic-chant-data.zip"
     if ! have "$DATA_ZIP" "$HC_DATA_MIN"; then
         adopt 'heroic-chant-data*.zip' "$DATA_ZIP" || {
@@ -222,21 +229,33 @@ if [ ! -s "$SERVER/hc/protocol/spec.json" ] || [ ! -d "$SERVER/data" ]; then
      then put heroic-chant-data.zip in your Downloads folder and re-run,
      or set HC_DATA_URL to where you host it." ;;
             esac
-            fetch "${HC_DATA_URL:-$(gdrive_url "$HC_DATA_ID")}" "$DATA_ZIP" "packet spec + data tables (~2 MB)"
+            fetch "${HC_DATA_URL:-$(gdrive_url "$HC_DATA_ID")}" "$DATA_ZIP" "packet spec + data tables + dashboard icons"
         }
         verify "$DATA_ZIP" zip "data bundle" "$HC_DATA_MIN"
     fi
-    say "Unpacking the data tables"
     TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+    say "Unpacking the data tables"
     unzip -q -o "$DATA_ZIP" -d "$TMP"
     [ -f "$TMP/spec.json" ] || die "that zip has no spec.json -- wrong bundle?"
-    mkdir -p "$SERVER/hc/protocol"
-    cp "$TMP/spec.json" "$SERVER/hc/protocol/spec.json"
-    rm -rf "$SERVER/data"; cp -r "$TMP/data" "$SERVER/data"
-    [ -f "$TMP/herocantare.db" ] && [ ! -s "$DB" ] && cp "$TMP/herocantare.db" "$DB"
-    ok "spec.json + $(ls "$SERVER"/data/*/*.json 2>/dev/null | wc -l) tables"
+    if [ "$NEED_SPEC" = 1 ]; then
+        mkdir -p "$SERVER/hc/protocol"
+        cp "$TMP/spec.json" "$SERVER/hc/protocol/spec.json"
+        rm -rf "$SERVER/data"; cp -r "$TMP/data" "$SERVER/data"
+        [ -f "$TMP/herocantare.db" ] && [ ! -s "$DB" ] && cp "$TMP/herocantare.db" "$DB"
+        ok "spec.json + $(ls "$SERVER"/data/*/*.json 2>/dev/null | wc -l) tables"
+    fi
+    if [ "$NEED_ICONS" = 1 ]; then
+        if [ -d "$TMP/icons" ] || [ -d "$TMP/hero_icons" ]; then
+            [ -d "$TMP/icons" ] && { rm -rf "$SERVER/icons"; cp -r "$TMP/icons" "$SERVER/icons"; }
+            [ -d "$TMP/hero_icons" ] && { rm -rf "$SERVER/hero_icons"; cp -r "$TMP/hero_icons" "$SERVER/hero_icons"; }
+            ok "dashboard icons ($(find "$SERVER/icons" "$SERVER/hero_icons" -name '*.png' 2>/dev/null | wc -l) images)"
+        else
+            warn "this data bundle predates dashboard icons -- delete $DATA_ZIP and"
+            warn "re-run once it has been rebuilt with tools/make_mobile_bundle.py"
+        fi
+    fi
 else
-    ok "packet spec and data tables already in place"
+    ok "packet spec, data tables and dashboard icons already in place"
 fi
 
 # ------------------------------------------------------------------- game --

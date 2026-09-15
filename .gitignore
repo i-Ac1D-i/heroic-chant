@@ -9,6 +9,10 @@
 /data/
 # exported cutscene text (tools/export_story.py)
 /story/
+# extracted resource icons (tools/extract_icons.py)
+/icons/
+# extracted hero portraits (tools/extract_hero_icons.py)
+/hero_icons/
 # packet + DTO layouts (tools/gen_protocol.py). Leading "/" anchors these to
 # the repo root, or "data/" would also swallow hc/data/.
 hc/protocol/spec.json

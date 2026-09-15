@@ -66,8 +66,11 @@ def count_price(count_price_type, nth):
         if to_int(r['count']) >= int(nth):
             pick = r
             break
-    return [(to_int(pick['costType%d' % i]), -1, to_int(pick['costValue%d' % i], 0))
-            for i in (1, 2, 3) if to_int(pick['costType%d' % i], -1) >= 0]
+    t1 = to_int(pick.get('costType1'), -1)
+    val = to_int(pick.get('costValue1'), 0)
+    if t1 < 0 or val <= 0:
+        return None
+    return [(t1, to_int(pick.get('costType2'), -1), val)]
 
 
 def cost(row, nth=1):
@@ -77,13 +80,11 @@ def cost(row, nth=1):
         priced = count_price(cpt, nth)
         if priced:
             return priced
-    out = []
-    for i in (1, 2, 3):
-        t1 = to_int(row.get('costType%d' % i), -1)
-        val = to_int(row.get('costValue%d' % i), 0)
-        if t1 >= 0 and val > 0:
-            out.append((t1, -1, val))
-    return out
+    t1 = to_int(row.get('costType1'), -1)
+    val = to_int(row.get('costValue1'), 0)
+    if t1 < 0 or val <= 0:
+        return []
+    return [(t1, to_int(row.get('costType2'), -1), val)]
 
 
 def parse_period(value):
