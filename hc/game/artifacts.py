@@ -29,11 +29,13 @@ Two facts off `artifactListTable`, worth not rediscovering:
   fodder for levelling, not something a hero wears.
 
 What is implemented: owning artifacts, sending them at login, equipping and
-unequipping, and levelling one up by feeding it others. What is not: rolling
-random stats (`artifactRandStatSelect`), unique effects
-(`artifactUniqueCreate`), option enhancement, tier-up and manufacture. An artifact
-here carries the flat `stat_Type` / `stat_Effect` its table row gives it.
+unequipping, levelling one up by feeding it others, and the initial random
+substat lines (`InitRandStatCount`) rolled once at creation. What is not:
+unique effects (`artifactUniqueCreate`), option enhancement, tier-up and
+manufacture.
 """
+import random
+
 from ..data.tables import TABLES, to_int
 from .enums import ResourceType
 from ..settings import SETTINGS
@@ -79,10 +81,61 @@ def catalogue(grades=None, limit=None):
     return ids[:limit] if limit else ids
 
 
+def _rand_stat_pool(group_id):
+    return [r for r in TABLES.sql('artifactRandStatSelect')
+            if to_int(r.get('RandStatGroupID'), -1) == int(group_id)]
+
+
+def _fix_stat_rows(group_id):
+    return sorted((r for r in TABLES.sql('artifactFixRandStatGroup')
+                   if to_int(r.get('FixRandStatGroup'), -1) == int(group_id)),
+                  key=lambda r: to_int(r.get('Index'), 0))
+
+
+def _rand_stat_value(grade, stat_type):
+    for r in TABLES.sql('artifactRandStatAdd'):
+        if (to_int(r.get('Grade'), -1) == grade
+                and to_int(r.get('Stat_Type'), -1) == stat_type):
+            lo_s, hi_s = str(r.get('Base_Min') or 0), str(r.get('Base_Max') or 0)
+            lo, hi = float(lo_s), float(hi_s)
+            if hi <= lo:
+                return lo
+            value = random.uniform(lo, hi)
+            fractional = '.' in lo_s or '.' in hi_s
+            return round(value, 3) if fractional else float(round(value))
+    return 0.0
+
+
+def roll_rand_stats(artifact_id):
+    """[(stat_type, value)] for the InitRandStatCount extra lines an artifact
+    gets, rolled once at creation."""
+    row = table(artifact_id) or {}
+    count = to_int(row.get('InitRandStatCount'), 0)
+    if count <= 0:
+        return []
+    fix_group = to_int(row.get('FixRandStatGroup'), -1)
+    if fix_group >= 0:
+        return [(to_int(r['StatType']), float(r.get('Base_Min') or 0))
+                for r in _fix_stat_rows(fix_group)[:count]]
+    pool = _rand_stat_pool(to_int(row.get('RandStatGroupID'), -1))
+    grade = grade_of(artifact_id)
+    picks = []
+    for _ in range(min(count, len(pool))):
+        weights = [max(0, to_int(r.get('Frequency'), 0)) for r in pool]
+        if sum(weights) <= 0:
+            break
+        pick = random.choices(pool, weights=weights, k=1)[0]
+        picks.append(pick)
+        pool = [r for r in pool if r is not pick]
+    return [(to_int(r['Stat_Type']), _rand_stat_value(grade, to_int(r['Stat_Type'])))
+            for r in picks]
+
+
 def make(uid, artifact_id):
     """One owned artifact, as it is stored on the player."""
     return {'uid': int(uid), 'id': int(artifact_id), 'exp': 0,
-            'enchant': 0, 'unique': -1, 'lock': 0, 'equip': 0}
+            'enchant': 0, 'unique': -1, 'lock': 0, 'equip': 0,
+            'rand_stats': roll_rand_stats(artifact_id)}
 
 
 def starter_set():
@@ -127,34 +180,36 @@ def enchant_level(a):
 
 
 def effects(a):
-    """`vecEffectInfo` for one artifact: its table row's flat stat, plus
-    whatever `artifactBaseStatAdd` adds for the current EnchantLevel.
-
-    The real game also rolls extra random lines on top (`InitRandStatCount`
-    says how many). Those are not implemented, so an artifact shows only its
-    one main stat. The client renders whatever it is sent, so a short list is
-    fine.
+    """`vecEffectInfo` for one artifact: its table row's flat stat (plus
+    whatever `artifactBaseStatAdd` adds for the current EnchantLevel), then
+    its rolled `InitRandStatCount` substat lines, if any.
     """
     from ..protocol.dto import TYPES
     row = table(a['id']) or {}
+    out = []
     stat = to_int(row.get('stat_Type'), -1)
-    if stat < 0:
-        return []
-    # stat_Effect is a plain int for some stats and a fraction ("0.063") for
-    # others -- to_int() raises ValueError on the latter and falls back to
-    # its default, so this was silently zero for every fractional stat.
-    value = float(row.get('stat_Effect') or 0)
-    level = enchant_level(a)
-    if level:
-        for r in TABLES.sql('artifactBaseStatAdd'):
-            if (to_int(r.get('Grade'), -1) == grade_of(a['id'])
-                    and to_int(r.get('Enhance'), -1) == level
-                    and to_int(r.get('Stat_Type'), -1) == stat):
-                value += float(r.get('Stat_Effect') or 0)
-                break
-    return [TYPES['NGArtifactEffectInfo'](
-        ArtifactUID=int(a['uid']), SlotNum=0, StatTypeID=stat,
-        StatEffectValue=value, UseUpgradePoint=0)]
+    if stat >= 0:
+        # stat_Effect is a plain int for some stats and a fraction ("0.063")
+        # for others -- to_int() raises ValueError on the latter and falls
+        # back to its default, so this was silently zero for every
+        # fractional stat.
+        value = float(row.get('stat_Effect') or 0)
+        level = enchant_level(a)
+        if level:
+            for r in TABLES.sql('artifactBaseStatAdd'):
+                if (to_int(r.get('Grade'), -1) == grade_of(a['id'])
+                        and to_int(r.get('Enhance'), -1) == level
+                        and to_int(r.get('Stat_Type'), -1) == stat):
+                    value += float(r.get('Stat_Effect') or 0)
+                    break
+        out.append(TYPES['NGArtifactEffectInfo'](
+            ArtifactUID=int(a['uid']), SlotNum=0, StatTypeID=stat,
+            StatEffectValue=value, UseUpgradePoint=0))
+    for slot, (rand_stat, rand_value) in enumerate(a.get('rand_stats') or [], 1):
+        out.append(TYPES['NGArtifactEffectInfo'](
+            ArtifactUID=int(a['uid']), SlotNum=slot, StatTypeID=rand_stat,
+            StatEffectValue=rand_value, UseUpgradePoint=0))
+    return out
 
 
 def info(a):

@@ -277,8 +277,10 @@ async def unlock_unit_collection(s, a):
     set_id = a['_id']
     step = unit_collections.unlock(p, set_id)
     if step is None:
+        log.info('collection %s: nothing new to claim (already at max achievable step)', set_id)
         await s.send(40358, Err.INVALID, state.resource_sync(p))
         return
     p.save()
+    log.info('collection %s unlocked step %d', set_id, step)
     await s.send(40358, Err.OK, state.resource_sync(
         p, vecChangeUnitCollection=[unit_collections.info(set_id, step)]))

@@ -16,7 +16,7 @@ def _grade_sum(player, row):
         u = next((u for u in player.d['units'] if int(u['id']) == hid), None)
         if u is None:
             return -1
-        total += int(u.get('grade', 0))
+        total += int(u.get('grade', 0)) + int(u.get('tier', 0))
     return total
 
 

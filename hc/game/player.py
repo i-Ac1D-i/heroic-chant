@@ -196,6 +196,7 @@ class Player(object):
             'scenecards': [],    # Relics (Scene Cards): likewise
             'forge': {},         # craft slots, keyed by slot index
             'awaken_stats': [],  # opened awakenRoleStatIDs
+            'role_stat_mastery': 0,
             'missions_done': [],
             'afk_claimed': now,     # City Search: last time idle rewards were taken
         })
@@ -440,6 +441,12 @@ class Player(object):
             stats.append(int(stat_id))
             return True
         return False
+
+    def role_stat_mastery_level(self):
+        return self.d.setdefault('role_stat_mastery', 0)
+
+    def set_role_stat_mastery_level(self, level):
+        self.d['role_stat_mastery'] = int(level)
 
     def grant_starter_relics(self):
         from . import artifacts as art

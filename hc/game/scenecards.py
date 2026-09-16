@@ -246,7 +246,7 @@ def roll_card(create_lv, unit_id):
 def make(uid, card_id):
     """One owned relic, as it is stored on the player."""
     return {'uid': int(uid), 'id': int(card_id), 'exp': 0,
-            'skill': 1, 'equip': 0, 'lock': 0}
+            'equip': 0, 'lock': 0}
 
 
 def info(r):
@@ -254,7 +254,7 @@ def info(r):
     from ..protocol.dto import TYPES
     return TYPES['NGSceneCard'](
         UID=int(r['uid']), ID=int(r['id']), EXP=int(r.get('exp', 0)),
-        SkillGrade=int(r.get('skill', 1)),
+        SkillGrade=int(skill_grade(r)),
         # -1, not 0, means "nobody".  The relic picker's own filter,
         # PopupboxSceneCardList.<UpdateList>b__29_6 @0x16FD720, is
         # `EquipUnitUID == -1`; sent 0, every relic reads as already worn and
@@ -347,6 +347,23 @@ def level_of(r):
         if lv <= cap and exp >= to_int(row.get('enchantExp'), 0):
             best = max(best, lv)
     return best
+
+
+def skill_grade(r):
+    """SkillGrade (1..maxSkillLevel), derived from level.
+
+    `sceneCardInfo` never stores a skill-up cost or a separate skill-grade
+    table row range beyond `sceneCardSkill.skillGrade` itself, and every card
+    in the data splits its `maxLevel` into `maxSkillLevel` even bands
+    (20/5, or 1/1) -- so the grade is level's own band, not a second
+    progression paid for separately.
+    """
+    cap = max_skill_grade(r['id'])
+    if cap <= 1:
+        return max(cap, 1)
+    total_levels = max_level(r['id']) or 1
+    level = min(level_of(r), total_levels)
+    return min(cap, 1 + ((level - 1) * cap) // total_levels)
 
 
 def sell_price(r):

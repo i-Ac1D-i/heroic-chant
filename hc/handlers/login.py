@@ -104,7 +104,8 @@ async def login(s, a):
     await s.send(40001, TYPES['NGLogInAck02'](
         vecUserGuideMissionChapter=guide.infos(player),
         vecMissionMultiConditionInfo=missions.multi_condition_infos(player),
-        vecUserUnitCollection=unit_collections.infos(player)))
+        vecUserUnitCollection=unit_collections.infos(player),
+        roleStatMasteryLevel=player.role_stat_mastery_level()))
     # vecAwakenStat is the account's claimed Awakening Passive Mastery stats.
     # Without it every one of them reads as unclaimed after a relogin, and
     # rank-up -- which is gated on the stat, not on the star count -- locks

@@ -61,16 +61,25 @@ GUIDE = 21                        # MissionType.GuideMission
 #   57 TotalUnitLevelUpMission @0x2278A7C  GetCollectionTypeAllValue(52) --
 #                         every key summed -- into the same tail  >= ClearVal_1
 KEY_NONE, KEY_VAL1, KEY_VAL2, KEY_ALL = None, 'ClearVal_1', 'ClearVal_2', 'all'
+KEY_VAL1_OR_ALL, KEY_VAL2_OR_ALL = 'val1_or_all', 'val2_or_all'
 CLEAR_RULES = {
     3: (CollectionType.ItemGradeUpCount, KEY_NONE, 'ClearVal_1'),
+    10: (CollectionType.GachaOpenCount, KEY_ALL, 'ClearVal_1'),
     12: (CollectionType.ContentsPlayCount, KEY_VAL2, 'ClearVal_1'),
     13: (CollectionType.ContentsClearCount, KEY_VAL2, 'ClearVal_1'),
+    15: (CollectionType.SceneCardGradeGetCount, KEY_VAL2_OR_ALL, 'ClearVal_1'),
     31: (CollectionType.AttendanceCount, KEY_NONE, 'ClearVal_1'),
     34: (CollectionType.UnitLevelUp, KEY_VAL1, 'ClearVal_2'),
+    46: (CollectionType.UnitLevelUp, KEY_ALL, 'ClearVal_1'),
+    56: (CollectionType.AwakenPartsSlotOpenCount, KEY_VAL1_OR_ALL, 'ClearVal_2'),
     57: (CollectionType.AllUnitLevelUpCount, KEY_ALL, 'ClearVal_1'),
 }
 # Kept for callers that only care about the counter type.
 CLEAR_TO_COLLECTION = {k: v[0] for k, v in CLEAR_RULES.items()}
+
+TARGET_UNIT_GRADE_UP = 29
+NO_BASELINE_TYPES = (TARGET_UNIT_GRADE_UP, 46)
+CHECK_MISSION_RECEIVED = 33
 
 # ContentsType.ArenaAttack -- the contents id arena missions are keyed on.
 ARENA_CONTENTS = 6
@@ -117,17 +126,30 @@ def periodic():
 
 def counter(player, mission_row):
     """The collection value this mission reads, or None if not implemented."""
-    rule = CLEAR_RULES.get(to_int(mission_row.get('ClearType'), -1))
+    ct = to_int(mission_row.get('ClearType'), -1)
+    if ct == TARGET_UNIT_GRADE_UP:
+        uid = to_int(mission_row.get('ClearVal_1'), -1)
+        grade = to_int(mission_row.get('ClearVal_2'), -1)
+        return 1 if player.get_collection(CollectionType.GetUnitCount, t2=uid, t3=grade) > 0 else 0
+    rule = CLEAR_RULES.get(ct)
     if rule is None:
         return None
     ctype, key_from, _target = rule
     if key_from == KEY_ALL:
         return sum(v for t1, _t2, _t3, v in player.collection_items() if t1 == int(ctype))
+    if key_from in (KEY_VAL1_OR_ALL, KEY_VAL2_OR_ALL):
+        column = 'ClearVal_1' if key_from == KEY_VAL1_OR_ALL else 'ClearVal_2'
+        t2 = to_int(mission_row.get(column), -1)
+        if t2 == -1:
+            return sum(v for t1, _t2, _t3, v in player.collection_items() if t1 == int(ctype))
+        return int(player.get_collection(ctype, t2=t2))
     t2 = to_int(mission_row.get(key_from), -1) if key_from else -1
     return int(player.get_collection(ctype, t2=t2))
 
 
 def target(mission_row):
+    if to_int(mission_row.get('ClearType'), -1) == TARGET_UNIT_GRADE_UP:
+        return 1
     rule = CLEAR_RULES.get(to_int(mission_row.get('ClearType'), -1))
     column = rule[2] if rule else 'ClearVal_1'
     return to_int(mission_row.get(column), 0)
@@ -149,8 +171,10 @@ def state(player, mission_row, now=None):
         # A daily or weekly mission starts from wherever the counter stands
         # now.  A lifetime mission starts from zero: "clear stage 1-3" must
         # count a stage the player cleared last month.
+        no_baseline = to_int(mission_row.get('ClearType'), -1) in NO_BASELINE_TYPES
         start = (counter(player, mission_row)
-                 if periodic_type(mission_row.get('missionType', 0)) else 0)
+                 if periodic_type(mission_row.get('missionType', 0)) and not no_baseline
+                 else 0)
         entry = book[mid] = {
             'season': season,
             'start': int(start) if start is not None else 0,
@@ -162,6 +186,10 @@ def state(player, mission_row, now=None):
 
 def progress(player, mission_row, now=None):
     """(done, needed), or (None, needed) when the type is not implemented."""
+    if to_int(mission_row.get('ClearType'), -1) == CHECK_MISSION_RECEIVED:
+        ref_row = row(to_int(mission_row.get('ClearVal_1'), -1))
+        done = 1 if ref_row is not None and state(player, ref_row, now)['received'] else 0
+        return done, 1
     need = target(mission_row)
     value = counter(player, mission_row)
     if value is None:
@@ -268,22 +296,7 @@ def record_unit_level(player, unit):
 
 
 # --------------------------------------------------------------------------
-# More counters the Guide Mission reads.  Each key and comparison is decoded
-# from MissionInfo.ClearMission; the client does the scoring itself from these,
-# so the job here is only to keep the counter right.
-#
-#   10 DimensionGachaOpenCount  @0x2278F18  GetCollectionTypeAllValue(9)
-#                               -- the sum over every banner -- >= ClearVal_1
-#   15 SceneCardGradeGetCount   @0x2278F54  GetKey(15, grade), or the sum of
-#                               type 15 when ClearVal_2 is -1   >= ClearVal_1
-#   29 TargetUnitGradeUp...     @0x22788FC  GetKey(6, unitID, grade) > 0
-#   46 TotalUnitLevelUp         @0x22790D0  GetCollectionTypeAllValue(37)
-#                               >= ClearVal_1 -- no baseline subtracted
-#   56 AwakenPartsSlotIDMission @0x22794B0  GetKey(43, partsID), or the sum
-#                               of type 43 when ClearVal_1 is -1 >= ClearVal_2
-#   33 CheckCompleteMissionID   @0x227900C -> NMMission.CheckCompleteMissionIDClear
-#                               @0x1F4DDE8: the mission named in ClearVal_1 has
-#                               IsReceived set.  No counter; already sent.
+# More counters the Guide Mission reads, decoded from MissionInfo.ClearMission.
 #
 # 64 UnitEquipAtSpecificSlot and 65 UnitSpecificAwaken read no counter at all:
 # they call into NMUserInfo and check the hero's own equipment and awakening,

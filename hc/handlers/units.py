@@ -278,6 +278,42 @@ def _awaken_stats(p):
             for sid in p.awaken_stats()]
 
 
+def _role_stat_counts(player):
+    counts = {0: 0, 1: 0, 2: 0}
+    for stat_id in player.awaken_stats():
+        row = awaken_stat_row(stat_id)
+        if row is None:
+            continue
+        index = to_int(row.get('index'), -1)
+        if index in counts:
+            counts[index] += 1
+    return counts
+
+
+@handler(30319)
+async def role_stat_mastery_lvup(s, a):
+    p = s.player
+    level = p.role_stat_mastery_level()
+    row = TABLES.row('RSMLvUpCondition', 'level', level + 1)
+    if row is None:
+        log.info('role stat mastery already at max level %d', level)
+        await s.send(40340, Err.INVALID, level)
+        return
+
+    counts = _role_stat_counts(p)
+    need = [to_int(row.get('roleStatCount_Index_%d' % i), 0) for i in range(3)]
+    if any(counts[i] < need[i] for i in range(3)):
+        log.info('role stat mastery lvup to %d needs %s, have %s',
+                 level + 1, need, [counts[i] for i in range(3)])
+        await s.send(40340, Err.NOT_ENOUGH, level)
+        return
+
+    p.set_role_stat_mastery_level(level + 1)
+    p.save()
+    log.info('role stat mastery level up: %d -> %d', level, level + 1)
+    await s.send(40340, Err.OK, level + 1)
+
+
 @handler(30093)
 async def unit_awaken_state_change(s, a):
     """Toggle one awakening node on or off.
