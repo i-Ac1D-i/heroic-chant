@@ -9,7 +9,7 @@ from datetime import datetime
 
 from ..net import handler
 from ..protocol.dto import TYPES
-from ..game import state, guild
+from ..game import state, guild, missions
 from ..game.errors import Err
 from ..game.enums import ResourceType
 
@@ -146,6 +146,7 @@ async def guild_donation(s, a):
     g['member']['donation'] = int(g['member'].get('donation', 0)) + cost
     g['member']['contribution'] = int(g['member'].get('contribution', 0)) + reward
     p.add_resource(ResourceType.GuildCoin, reward)
+    missions.record_guild_donation(p)            # the daily guild mission
     p.save()
     log.info('donated %d gold -> +%d contribution, guild level %d',
              cost, reward, guild.level_for(g['contribution']))

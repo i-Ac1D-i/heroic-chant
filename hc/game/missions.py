@@ -45,11 +45,15 @@ from ..data.tables import TABLES, to_int
 from .enums import CollectionType
 
 DAILY, WEEKLY = 1, 2              # MissionType @dump.cs:642083
+GUILD_DAILY, GUILD_WEEKLY = 5, 6  # MissionType.GuildDaily / GuildWeekly
 ARENA_DAILY = 9                   # MissionType.ArenaDaily
 GUIDE = 21                        # MissionType.GuideMission
-# The mission types that restart every day, and every week.
-DAILY_TYPES = (DAILY, ARENA_DAILY)
-WEEKLY_TYPES = (WEEKLY,)
+# The mission types that restart every day, and every week.  The guild ones
+# are what the Guild screen's mission tab lists (GuildMainMissionUI.UpdateUI
+# @0x187C9D0 reads GetMissionList(5) and (6)); the client only shows them to a
+# guild member (MissionOpenType 3, JoinGuild).
+DAILY_TYPES = (DAILY, ARENA_DAILY, GUILD_DAILY)
+WEEKLY_TYPES = (WEEKLY, GUILD_WEEKLY)
 
 # MissionClearType -> (CollectionType it reads, which ClearVal is the key's
 # second part, which ClearVal is the target).  Every row decoded from the
@@ -63,6 +67,9 @@ WEEKLY_TYPES = (WEEKLY,)
 #   34 UnitLevelUp        @0x2278BB4  GetKey(37, ClearVal_1)  >= ClearVal_2
 #    3 ItemUpgrade        @0x2278E78  GetKey(2)               >= ClearVal_1
 #   23 ArenaAttackWinPoint @0x2278BA0 GetKey(22)              >= ClearVal_1
+#   20 GuildAttendanceCount @0x2278FCC GetKey(19)             >= ClearVal_1
+#   21 GuildDonationCount  @0x2278FD4 GetKey(20)              >= ClearVal_1
+#   22 SupportGuildResource @0x2278FDC GetKey(21)             >= ClearVal_1
 #   57 TotalUnitLevelUpMission @0x2278A7C  GetCollectionTypeAllValue(52) --
 #                         every key summed -- into the same tail  >= ClearVal_1
 KEY_NONE, KEY_VAL1, KEY_VAL2, KEY_ALL = None, 'ClearVal_1', 'ClearVal_2', 'all'
@@ -70,6 +77,9 @@ KEY_VAL1_OR_ALL, KEY_VAL2_OR_ALL = 'val1_or_all', 'val2_or_all'
 CLEAR_RULES = {
     3: (CollectionType.ItemGradeUpCount, KEY_NONE, 'ClearVal_1'),
     23: (CollectionType.ArenaAttackWinPoint, KEY_NONE, 'ClearVal_1'),
+    20: (CollectionType.GuildAttendanceCount, KEY_NONE, 'ClearVal_1'),
+    21: (CollectionType.GuildDonationCount, KEY_NONE, 'ClearVal_1'),
+    22: (CollectionType.SupportGuildResource, KEY_NONE, 'ClearVal_1'),
     10: (CollectionType.GachaOpenCount, KEY_ALL, 'ClearVal_1'),
     12: (CollectionType.ContentsPlayCount, KEY_VAL2, 'ClearVal_1'),
     13: (CollectionType.ContentsClearCount, KEY_VAL2, 'ClearVal_1'),
@@ -428,6 +438,14 @@ def record_arena_fight(player, won):
     points = arena_mission_points(won)
     if points:
         player.add_collection(CollectionType.ArenaAttackWinPoint, points)
+
+
+def record_guild_donation(player):
+    """GuildDonationCount: +1 per donation -- the daily guild mission "donate
+    once" (20002) reads it.  Baselines are pinned first, as for arena fights."""
+    for r in periodic():
+        state(player, r)
+    player.add_collection(CollectionType.GuildDonationCount, 1)
 
 
 # The 1v1 arena's daily reward is a points ladder: missions 1001-1004

@@ -190,9 +190,35 @@ def main():
         check('a guild can be founded', p.d.get('guild') is not None, d)
 
         # ------------------------------------------------------------------
+        print('\nthe guild missions (MissionType 5 daily, 6 weekly)')
+        infos = {i.ID: i for i in missions.infos(p)}
+        check('the guild missions go out with the others',
+              all(m in infos for m in (20001, 20002, 20003, 20004, 30001, 30002)),
+              sorted(m for m in infos if m >= 20000))
+        donate = missions.row(20002)
+        check('20002 is "donate once", scored on collection 20',
+              donate['ClearType'] == '21'
+              and missions.CLEAR_TO_COLLECTION[21] == CollectionType.GuildDonationCount == 20)
+        d = call(s, 30029, vecMission=[20002], bShowEnable=True)
+        check('it cannot be claimed before donating', d['Error'] != 0)
+
         print('\nthe daily guild donation')
         cap = guild.donation_cap()
-        for _ in range(cap):
+        call(s, 30095)
+        check('a donation counts for the mission', missions.progress(p, donate) == (1, 1),
+              missions.progress(p, donate))
+        d = call(s, 30029, vecMission=[20002], bShowEnable=True)
+        check('and then it can be claimed', d['Error'] == 0, d['Error'])
+        tomorrow = datetime.utcnow() + timedelta(days=1)
+        check('the next day it starts again',
+              missions.progress(p, donate, now=tomorrow)[0] == 0
+              and not missions.state(p, donate, now=tomorrow)['received'])
+        week = missions.row(30001)
+        check('the weekly one resets by the week, not the day',
+              missions.period(6, datetime(2026, 9, 21)) == missions.period(6, datetime(2026, 9, 27))
+              and missions.period(6, datetime(2026, 9, 21)) != missions.period(6, datetime(2026, 9, 28))
+              and week['missionType'] == '6')
+        for _ in range(cap - 1):
             call(s, 30095)
         check('the day fills up', p.d['guild']['donation_count'] == cap,
               p.d['guild']['donation_count'])
