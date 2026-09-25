@@ -46,17 +46,18 @@ def main():
             u['grade'] = grade
 
         set_id = 1001
+        # The client counts Grade + 1 per hero (its star count), so owning all
+        # three at grade 0 already reaches step 1 (condition 3) --
+        # NMUserInfo.GetHeroCollectionCanStepClear @0x1384EA4.  Tier is set
+        # high on purpose: it must not count.
         for uid in (1, 10, 35):
             set_grade(uid, 0)
+            next(u for u in p.d['units'] if int(u['id']) == uid)['tier'] = 9
 
         print('\nHero Collection unlock (set %d, heroes 1/10/35)' % set_id)
-        check('nothing achievable at grade 0', uc.achievable_step(p, set_id) == 0)
-        d = call(s, 30334, _id=set_id)
-        check('claiming with nothing achievable is refused', d['_iError'] != 0, d['_iError'])
-
-        for uid in (1, 10, 35):
-            set_grade(uid, 1)
-        check('step 1 (sum 3) is now achievable', uc.achievable_step(p, set_id) == 1)
+        check('step 1 (sum 3) is reached by owning all three at grade 0, '
+              'whatever their tier', uc.achievable_step(p, set_id) == 1,
+              uc.achievable_step(p, set_id))
         d = call(s, 30334, _id=set_id)
         check('claiming succeeds', d['_iError'] == 0, d['_iError'])
         check('and is recorded', uc.claimed_step(p, set_id) == 1)
@@ -69,7 +70,7 @@ def main():
         check('claiming the same step again is refused', d['_iError'] != 0)
 
         for uid in (1, 10, 35):
-            set_grade(uid, 2)
+            set_grade(uid, 1)
         check('step 2 (sum 6) is now achievable', uc.achievable_step(p, set_id) == 2)
         d = call(s, 30334, _id=set_id)
         check('claiming the next step succeeds', d['_iError'] == 0, d['_iError'])
@@ -82,6 +83,9 @@ def main():
         p.d['units'] = [u for u in p.d['units'] if int(u['id']) != missing_hero]
         check('a set missing one of its heroes is never achievable',
               uc.achievable_step(p, other_set) == 0)
+        d = call(s, 30334, _id=other_set)
+        check('claiming with nothing achievable is refused', d['_iError'] != 0,
+              d['_iError'])
 
     finally:
         os.environ.pop('HC_SETTINGS', None)

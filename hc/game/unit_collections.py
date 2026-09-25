@@ -11,12 +11,20 @@ def _hero_ids(row):
 
 
 def _grade_sum(player, row):
+    """The client's own sum: every hero in the set contributes Grade + 1 --
+    its star count -- and a step is reached when GradeCondition <= the sum.
+
+    NMUserInfo.GetHeroCollectionCanStepClear @0x1384EA4: for each unit id,
+    `total += NGUnitInfo.Grade (+0x24) + 1`, then
+    `UnitCollection.GradeCondition (+0x2C) <= total`.  Tier plays no part.
+    So step 1 of a three-hero set (condition 3) is simply owning all three.
+    """
     total = 0
     for hid in _hero_ids(row):
         u = next((u for u in player.d['units'] if int(u['id']) == hid), None)
         if u is None:
             return -1
-        total += int(u.get('grade', 0)) + int(u.get('tier', 0))
+        total += int(u.get('grade', 1)) + 1
     return total
 
 

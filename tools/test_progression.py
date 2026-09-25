@@ -430,7 +430,10 @@ def main():
         check('the craft can be collected', d['Error'] == 0, d['Error'])
         check('and the relic arrives', len(p.scenecards()) == owned + 1)
         check('the client is told', len(d['_CheckInfo'].vecAddSceneCard or []) == 1)
-        check('the slot is empty again', d['_info'].ResultSceneCardID == 0)
+        # -1 is the client's "nothing here" (DimensionBlackSmithSlotUI.UpdateUI
+        # @0x1A2DAA4); 0 would read as a real card id.
+        check('the slot is empty again', d['_info'].ResultSceneCardID == -1,
+              d['_info'].ResultSceneCardID)
         d = call(s, 30157, _SlotIndex=1)
         check('collecting twice is refused', d['Error'] != 0)
 
