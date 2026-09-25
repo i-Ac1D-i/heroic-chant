@@ -246,6 +246,10 @@ rank-up, equipping relics, and what a bot opponent actually reaches the client
 as.
 `python tools/test_bootserver_overlay.py` if you touched the boot server's
 manifest or the `client-overrides/` overlay.
+`python tools/test_stars.py` if you touched stage clears or story stars.
+`python tools/test_city_search.py` if you touched City Search.
+`python tools/test_not_open.py` if you touched hc/handlers/not_open.py --
+and when you implement one of those modes, delete its line there.
 `bash tools/test-termux-setup.sh` if you touched the installer. It's not a unit test suite, it's an
 end-to-end run against a real socket, which for this project catches more.
 

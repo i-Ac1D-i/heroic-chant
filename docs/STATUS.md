@@ -1276,3 +1276,135 @@ levelling here only adds MaterialEXP and never raises EnchantLevel). Every
 chapter still has at least one, so **no chapter's final reward is reachable yet.**
 
 `tools/test_mail_guide.py` now 58 checks.
+
+## Fifteenth pass: the checklist, without a device
+
+Worked from the user's `checklist.docx` (features coloured working / sorta /
+not working) with no emulator available. The rule for the session: implement
+only what can be settled by reading the client, and list everything that
+needs someone at the screen. Everything below is on branch `checklist-work`,
+one commit per item.
+
+First, two regressions from the last merge: `test_unit_collections` and
+`test_progression` were failing. The progression one was a stale test (the
+forge's empty slot is -1 now, per the client). The Hero Collection one was a
+real formula question: the client counts **Grade + 1 per hero**
+(`NMUserInfo.GetHeroCollectionCanStepClear` @0x1384EA4: `total += Grade + 1`,
+then `GradeCondition <= total`). The old code used grade, the new one
+grade + tier; both were off. So step 1 of a three-hero set is just owning all
+three.
+
+### 1v1 Arena daily points
+
+The points bar on the arena screen is `NMMission.GetArenaAttackWinPoint`
+@0x1F4D938: collection **22 (ArenaAttackWinPoint)** minus the first
+**ArenaDaily (MissionType 9)** mission's StartCollectionValue. Missions
+1001-1004 (2/4/8/12 points, ClearType 23 -> GetKey(22) @0x2278BA0) were never
+sent and the counter never kept, so the bar sat at 0. Points per fight come
+from `arenaMissionPoint` contents 6; its groupID 0/1/2 matches the client's
+`ArenaMatchIndex` (Blind/Normal/OnlyAI), and this client's arena screen only
+has the blind Match button, so every fight is 3 for a win, 1 for a loss
+(INFERRED from the enum and the screen).
+
+The arena "skip" is client-side: the skip button in `PvPScene` just sets
+`NMUserInfo.skipBattlePvp` and runs the fight at speed (shown unless system
+function 89 is switched off by an event). Nothing to fix on the server.
+
+### Command Center: commanders in battle
+
+`CommandersPartyChangeReq` (30301) had no handler. It carries (PartyType,
+CommanderID), -1 meaning none; the client keeps `vecCommandersPartyInfo` and
+upserts by PartyType (`AddCommanderParty` @0x13AACF8). Stored per party,
+echoed back as `vecAddCommandersPartyInfo`, sent at login in
+`NGLogInAck01`. The Wave Raid picker clears the other party itself before
+moving a commander. Old saves only had commander 1; Sarah (0) and Demitt (2)
+are added on login.
+
+### Story stars
+
+The big one. The stage list and the floor's "x/30" both read collection
+**29 (NormalDungeonStarCount) / 30 (Hard) keyed by dungeon id**, holding the
+3-bit star mask (`StarFloorRewardBox.InitStarFloorReward` @0x1443C14,
+`GetStarRewardFlagToCount` @0x1356D60, `LocalinformationDungeon.SetDungeonInfo`
+picks 29 when modeType is 0, else 30). The server stored 29 keyed by *floor*,
+holding a count -- so no stage ever showed a star -- and its Hard check
+compared modeID with 1, when Hard is ContentsType 13.
+
+- Stage masks now go to (29/30, dungeonID). `hc/game/stars.py`.
+- Each stage's three star rewards (`starSystemReward` rows with a dungeonID,
+  starIndex 1-3) pay when that star is first earned, not all three on first
+  clear.
+- Floor chests: `GetDungeonStarRewardReq` (30220, `_ModeID` is the stage's
+  modeType, `_StarCount` the chest's goal) opens the dungeonID -1 rows once
+  the floor's stars reach the goal. Claimed chests are collection
+  **31/32 keyed (floor, goal)** with a bit per story season, 1/2/4
+  (`ConvertStorySeasonToStarFloorRewardSeasonFlagType`, table [1,2,4] at
+  0x3C51118).
+- A one-time migration drops the old floor-keyed counts (they would read as
+  phantom stars on stages 1-20) and rebuilds masks from the stage clears.
+  The old code had paid all three star rewards on first clear; that is
+  recorded so nothing is paid twice.
+
+`tools/test_stars.py`, 32 checks.
+
+### City Search fast reward
+
+`GetDungeonAutoPlayFastRewardReq` (30268) had no handler and the scene was
+always told zero purchases. `PopupboxSpeedAcquired` shows the next purchase
+as `fastRewardTime[recv + 1]` and sums rows recv+1..recv+count for its slider;
+the only field of `NGDungeonAutoPlayFastReward` any screen reads is
+`FastRewardRecvCount`. Buying n lots charges those rows (1 000 gold, then
+10..100 TotalCash), pays 120 minutes of the farm each, caps at 10 a day and
+resets daily (UTC day: INFERRED). `tools/test_city_search.py`.
+
+### Guild missions
+
+The Guild screen's mission tab (`GuildMainMissionUI.UpdateUI` @0x187C9D0)
+lists MissionType 5 (GuildDaily) and 6 (GuildWeekly); they were never sent.
+Now they go out with the other periodic missions. ClearTypes 20/21/22 read
+collections 19/20/21 (@0x2278FCC..FDC); donations now count, so "donate
+once" and the weekly portal mission work. The rest need guild dungeons,
+advent bosses or resource support.
+
+### Not-open replies instead of silence
+
+Sixteen user-initiated requests for modes the server does not run had no
+handler, so the client waited forever (the Advent Boss freeze). Each now gets
+its own Ack with a message from the client's `errorString` table. For every
+one, the xref shows it is sent from a Start/confirm button, and the Ack
+handler's error branch is ShowServerError, notify, return (traced in the
+disassembly; a false return from a handler only prints a console line).
+Requests the client sends by itself when a screen opens are left alone.
+`hc/handlers/not_open.py`; implementing a mode means deleting its line.
+
+### Checked, nothing to change
+
+- **Guide Mission claims.** Every one of the 147 guide missions and the four
+  chapter rewards pay through the real handlers when complete; the server's
+  validated clear types read the same counters the client scores on. The
+  claim button sends the ordinary 30029. What stays out of reach is the
+  chapters' final rewards (content not implemented).
+- **Change Frame.** The collaborator's handler already follows the client
+  (FrameID 0 is "release"). Frames are ResourceType Frame and can be granted
+  from the dashboard to try switching.
+
+### Needs the device
+
+Battle modes -- Hero Dungeon (30037/38), Hard stages (30158/59; tickets are
+ResourceType 123 with error -468 opening the purchase popup, stages have
+`openCoolTime` cooldowns and a stamina FailCost), Dimension Crack =
+TrainingTower (30041-43), Trial Tower = OrdealTower (30164-69), Advent Boss =
+BossDungeon (30179/80, 30344, plus DungeonAdventure 30261-63 for its repeat),
+Dimension Gap (30045-51), Cube Dungeon (30335-37), Other World Boss =
+TotalDamageDungeon (30294-97), Wave Raid (30314-18, 30350-56), Quest House =
+HeartHeater (30274-82), Guild Labyrinth = GuildRaid (30146-53), World Raid
+(multiplayer). Their start packets mirror the story's, which works, but only a
+device can show the battle scene loads.
+
+Also: the Portal (summoning -- the Ack experiment), Create Guild's freeze
+(the screen is notified through delegates that do not show up in an xref),
+shop tabs (ShopInfo.shopType does not map straight onto
+`ShopFormDef.ShopType`, and the Special Shop is tied to the NPC Request
+system, 30067-71), Earrings (accessories: a whole subsystem the inventory
+renders), duo-hero costumes, Guild invite/join and Resource Exchange (guilds
+here are one per player), Guild War battles, and the real-time arenas.
