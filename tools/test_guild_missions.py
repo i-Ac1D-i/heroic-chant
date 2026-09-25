@@ -135,6 +135,53 @@ def main():
               missions.progress(p, row))
 
         # ------------------------------------------------------------------
+        print('\nthe 1v1 Arena daily points ladder (missions 1001-1004)')
+        ladder = [missions.row(m) for m in (1001, 1002, 1003, 1004)]
+        # The fights above already earned points today; start from a fresh
+        # baseline so the numbers below are this section's alone.
+        for m in (1001, 1002, 1003, 1004):
+            p.d['missions'].pop(str(m), None)
+        check('they are ArenaDaily missions scored on ArenaAttackWinPoint',
+              all(r['missionType'] == '9' and r['ClearType'] == '23' for r in ladder))
+        infos = {i.ID: i for i in missions.infos(p)}
+        check('all four go out at login', all(m in infos for m in (1001, 1002, 1003, 1004)))
+        check('clear type 23 reads collection 22',
+              missions.CLEAR_TO_COLLECTION[23] == CollectionType.ArenaAttackWinPoint == 22)
+        pts = lambda: missions.progress(p, ladder[0])[0]
+        base = pts()
+        missions.record_arena_fight(p, won=True)
+        check('a win is worth 3 points', pts() == base + 3, pts())
+        missions.record_arena_fight(p, won=False)
+        check('a loss is worth 1', pts() == base + 4, pts())
+        check('the start value the client subtracts is today\'s baseline',
+              infos[1001].StartCollectionValue
+              == missions.state(p, ladder[0])['start'])
+
+        d = call(s, 30029, vecMission=[1001, 1002], bShowEnable=True)
+        changed = {m.ID for m in (d['_CheckInfo'].vecChangeMissionInfo or []) if m.IsReceived}
+        check('2 and 4 points can be claimed', changed == {1001, 1002}, changed)
+        d = call(s, 30029, vecMission=[1003], bShowEnable=True)
+        check('8 points cannot yet', d['Error'] != 0, d['Error'])
+
+        # Through the real arena result handler: the counter reaches the client.
+        from hc.game import arena
+        arena.record(p)['matches'] = []
+        before = p.get_collection(CollectionType.ArenaAttackWinPoint)
+        d = call(s, 30058, iWinLose=1, iMyTotalPower=1, iMatchTotalPower=1,
+                 _iMatchUserAccount=-1, _iMatchIndex=0, dungeonID=0,
+                 strRecordInfo='', AuthEnable=False, _LogString='')
+        check('an arena win through 30058 adds the points',
+              p.get_collection(CollectionType.ArenaAttackWinPoint) == before + 3)
+        sent = [(c.Type1, c.Value1) for c in (d['_CheckInfo'].vecAddCollectionInfo or [])]
+        check('and the new total reaches the client',
+              (22, before + 3) in [(t, v) for t, v in sent], sent)
+
+        tomorrow = datetime.utcnow() + timedelta(days=1)
+        check('the ladder starts again the next day',
+              missions.progress(p, ladder[0], now=tomorrow)[0] == 0
+              and not missions.state(p, ladder[1], now=tomorrow)['received'])
+
+        # ------------------------------------------------------------------
         print('\na guild to test with')
         p.add_resource(ResourceType.Gold, 50_000_000)
         d = call(s, 30082, _Guild=TYPES['NGGuild'](

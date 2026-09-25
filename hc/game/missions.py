@@ -45,7 +45,11 @@ from ..data.tables import TABLES, to_int
 from .enums import CollectionType
 
 DAILY, WEEKLY = 1, 2              # MissionType @dump.cs:642083
+ARENA_DAILY = 9                   # MissionType.ArenaDaily
 GUIDE = 21                        # MissionType.GuideMission
+# The mission types that restart every day, and every week.
+DAILY_TYPES = (DAILY, ARENA_DAILY)
+WEEKLY_TYPES = (WEEKLY,)
 
 # MissionClearType -> (CollectionType it reads, which ClearVal is the key's
 # second part, which ClearVal is the target).  Every row decoded from the
@@ -58,12 +62,14 @@ GUIDE = 21                        # MissionType.GuideMission
 #   31 AttendanceCount    @0x2278FFC  GetKey(34)              >= ClearVal_1
 #   34 UnitLevelUp        @0x2278BB4  GetKey(37, ClearVal_1)  >= ClearVal_2
 #    3 ItemUpgrade        @0x2278E78  GetKey(2)               >= ClearVal_1
+#   23 ArenaAttackWinPoint @0x2278BA0 GetKey(22)              >= ClearVal_1
 #   57 TotalUnitLevelUpMission @0x2278A7C  GetCollectionTypeAllValue(52) --
 #                         every key summed -- into the same tail  >= ClearVal_1
 KEY_NONE, KEY_VAL1, KEY_VAL2, KEY_ALL = None, 'ClearVal_1', 'ClearVal_2', 'all'
 KEY_VAL1_OR_ALL, KEY_VAL2_OR_ALL = 'val1_or_all', 'val2_or_all'
 CLEAR_RULES = {
     3: (CollectionType.ItemGradeUpCount, KEY_NONE, 'ClearVal_1'),
+    23: (CollectionType.ArenaAttackWinPoint, KEY_NONE, 'ClearVal_1'),
     10: (CollectionType.GachaOpenCount, KEY_ALL, 'ClearVal_1'),
     12: (CollectionType.ContentsPlayCount, KEY_VAL2, 'ClearVal_1'),
     13: (CollectionType.ContentsClearCount, KEY_VAL2, 'ClearVal_1'),
@@ -110,18 +116,19 @@ def reward(mission_row):
 def period(mission_type, now=None):
     """The Season a mission of this type belongs to right now.  INFERRED."""
     now = now or datetime.utcnow()
-    if int(mission_type) == DAILY:
+    if int(mission_type) in DAILY_TYPES:
         return now.date().toordinal()
-    if int(mission_type) == WEEKLY:
+    if int(mission_type) in WEEKLY_TYPES:
         year, week, _ = now.isocalendar()
         return year * 100 + week
     return 0
 
 
 def periodic():
-    """The daily and weekly missions -- the ones that reset and go out at login."""
+    """The missions that reset and go out at login: daily, weekly, and the
+    1v1 arena's daily points ladder (ArenaDaily, 1001-1004)."""
     return [r for r in TABLES.json('missionList')
-            if to_int(r.get('missionType'), -1) in (DAILY, WEEKLY)]
+            if to_int(r.get('missionType'), -1) in DAILY_TYPES + WEEKLY_TYPES]
 
 
 def counter(player, mission_row):
@@ -158,7 +165,7 @@ def target(mission_row):
 def periodic_type(mission_type):
     """Daily and weekly missions restart each period; everything else -- the
     Guide Mission among them -- counts a lifetime total from zero."""
-    return int(mission_type) in (DAILY, WEEKLY)
+    return int(mission_type) in DAILY_TYPES + WEEKLY_TYPES
 
 
 def state(player, mission_row, now=None):
@@ -418,3 +425,29 @@ def record_arena_fight(player, won):
     if won:
         player.add_collection(CollectionType.ContentsClearCount, 1,
                               t2=ARENA_CONTENTS)
+    points = arena_mission_points(won)
+    if points:
+        player.add_collection(CollectionType.ArenaAttackWinPoint, points)
+
+
+# The 1v1 arena's daily reward is a points ladder: missions 1001-1004
+# (MissionType.ArenaDaily, ClearType 23) at 2/4/8/12 points.  The bar on the
+# arena screen is NMMission.GetArenaAttackWinPoint @0x1F4D938: collection 22
+# (ArenaAttackWinPoint) minus the first ArenaDaily mission's
+# StartCollectionValue -- so it needs both the counter and the missions, and
+# the server sent neither.
+#
+# Points per fight come from `arenaMissionPoint`, contentsID 6, whose groupID
+# 0/1/2 lines up with the client's ArenaMatchIndex enum (Blind 0, Normal 1,
+# OnlyAI 2).  This client's arena screen (PvPEntranceSceneInit) offers only the
+# blind Match button, so every fight is group 0: 3 points a win, 1 a loss.
+# INFERRED from the enum and the screen; the table itself is the client's.
+ARENA_MATCH_BLIND = 0
+
+
+def arena_mission_points(won, group=ARENA_MATCH_BLIND):
+    for r in TABLES.json('arenaMissionPoint'):
+        if (to_int(r.get('contentsID'), -1) == ARENA_CONTENTS
+                and to_int(r.get('groupID'), -1) == int(group)):
+            return to_int(r.get('winPoint' if won else 'losePoint'), 0)
+    return 0
