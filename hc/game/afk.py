@@ -5,6 +5,14 @@ table is ``rewardTime``: one row per resource per stage, with ``ratio`` out of
 10000 as the per-tick chance and ``val_1`` as the amount. The farmed stage is
 the furthest one the player has cleared, which is how the live game worked.
 
+A tick is **5 seconds**, 12 a minute: every screen that shows the farm's
+amounts goes through ``NMUserInfo.GetDungeonRewardTimeObtainableRewardValue``
+@0x13AB904, which returns ``minutes * val_1 * 12`` (plus guild/VIP buff rates
+this server has none of), and ``PopupboxSpeedAcquired`` keeps the same 5 as
+``DUNGEON_AUTO_PLAY_REWARD_TIME`` (set in its ctor @0x1B7E410). The rate list
+on the City Search screen calls it with minutes = 1. The server used to count
+one tick an hour, 720 times too little.
+
 ``RewardPeriodHours`` caps how long it accrues before it stops, so leaving the
 game for a week still only pays a full bar.
 """
@@ -14,7 +22,8 @@ from datetime import datetime, timedelta
 from ..data.tables import TABLES, to_int
 
 PERIOD_HOURS = 12          # NGDungeonAutoPlayInfo.RewardPeriodHours
-TICKS_PER_HOUR = 1
+TICK_SECONDS = 5           # PopupboxSpeedAcquired.DUNGEON_AUTO_PLAY_REWARD_TIME
+TICKS_PER_MINUTE = 60 // TICK_SECONDS
 
 
 def farm_dungeon(player):
@@ -46,22 +55,24 @@ def preview(player, now=None):
 
 
 def roll(dungeon_id, hours, rng=random):
-    ticks = int(hours * TICKS_PER_HOUR)
+    # Whole minutes, as the client counts them for its display.
+    ticks = int(round(hours * 60, 6)) * TICKS_PER_MINUTE
     if ticks <= 0:
         return []
     rows = TABLES.index('rewardTime', 'dungeonID', unique=False).get(int(dungeon_id), [])
     totals = {}
-    for _ in range(ticks):
-        for r in rows:
-            ratio = to_int(r.get('ratio'), 0)
-            if ratio <= 0:
-                continue
-            # ratio is per-10000; 10000 means it always drops.
-            if ratio < 10000 and rng.randrange(10000) >= ratio:
-                continue
-            key = (to_int(r['resource_type1']), to_int(r['resource_type2']),
-                   to_int(r['resource_type3']))
-            totals[key] = totals.get(key, 0) + to_int(r.get('val_1'), 0)
+    for r in rows:
+        ratio = to_int(r.get('ratio'), 0)
+        if ratio <= 0:
+            continue
+        # ratio is per-10000 per tick; 10000 means it always drops.
+        if ratio >= 10000:
+            hits = ticks
+        else:
+            hits = sum(1 for _ in range(ticks) if rng.randrange(10000) < ratio)
+        key = (to_int(r['resource_type1']), to_int(r['resource_type2']),
+               to_int(r['resource_type3']))
+        totals[key] = totals.get(key, 0) + hits * to_int(r.get('val_1'), 0)
     return [(k[0], k[1], k[2], v) for k, v in totals.items() if v > 0]
 
 

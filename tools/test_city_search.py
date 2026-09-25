@@ -95,6 +95,20 @@ def main():
         check('and the first purchase is gold again',
               afk.fast_cost(p, 1, tomorrow) == [(gold, -1, 1000)],
               afk.fast_cost(p, 1, tomorrow))
+
+        print('\nhow much the farm pays')
+        # A tick is 5 seconds (GetDungeonRewardTimeObtainableRewardValue:
+        # minutes * val_1 * 12).  Stage 53's rows: 29 gold, 11 LvMateria,
+        # 7 LvExp every tick, and a random box at 13 in 10000.
+        got = {(t1, t2): v for t1, t2, _t3, v in afk.roll(53, 2.0)}
+        check('two hours of stage 53 is 1 440 ticks: 41 760 gold',
+              got.get((0, -1)) == 1440 * 29, got)
+        check('15 840 LvMateria', got.get((2, -1)) == 1440 * 11, got)
+        check('10 080 LvExp', got.get((4, -1)) == 1440 * 7, got)
+        check('the random box stays rare', got.get((48, 2000), 0) < 20, got)
+        check('part of a minute pays nothing yet', afk.roll(53, 0.5 / 60) == [])
+        full = {(t1, t2): v for t1, t2, _t3, v in afk.roll(53, afk.PERIOD_HOURS)}
+        check('a full 12-hour bar is 8 640 ticks', full.get((0, -1)) == 8640 * 29, full)
     finally:
         os.environ.pop('HC_SETTINGS', None)
         shutil.rmtree(sandbox, ignore_errors=True)
