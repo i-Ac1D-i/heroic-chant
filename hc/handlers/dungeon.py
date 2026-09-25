@@ -38,11 +38,14 @@ def open_enables(player):
     return out
 
 
+def _fast_reward_info(p):
+    return TYPES['NGDungeonAutoPlayFastReward'](**afk.fast_info_fields(p))
+
+
 @handler(30008)
 async def dungeon_scene_join(s, a):
     await s.send(40013, Err.OK, _autoplay_info(s.player),
-                 state.resource_sync(s.player),
-                 TYPES['NGDungeonAutoPlayFastReward']())
+                 state.resource_sync(s.player), _fast_reward_info(s.player))
 
 
 @handler(30009)
@@ -168,6 +171,40 @@ async def get_dungeon_star_reward(s, a):
     log.info('floor %d (mode %d, season %d) star chest %d opened: %s',
              floor, mode, season, count, payout)
     await reply(Err.OK)
+
+
+@handler(30268)
+async def dungeon_autoplay_fast_reward(s, a):
+    """City Search "Speed Acquired": buy `_count` lots of 2 hours' loot.
+
+    It had no handler, so the purchase never came back.  Costs and limits are
+    fastRewardTime's; see hc/game/afk.py.
+    """
+    p = s.player
+    count = int(a['_count'])
+    costs = afk.fast_cost(p, count) if count > 0 else None
+    if costs is None:
+        log.info('fast reward: %d more would pass the daily %d', count, afk.fast_max())
+        await s.send(40290, Err.INVALID, _fast_reward_info(p), state.resource_sync(p))
+        return
+    for t1, t2, v in costs:
+        have = p.total_cash() if t1 == p.TOTAL_CASH else p.get_resource(t1, t2)
+        if have < v:
+            log.info('fast reward: not enough %d:%d (%d < %d)', t1, t2, have, v)
+            await s.send(40290, Err.NOT_ENOUGH, _fast_reward_info(p),
+                         state.resource_sync(p))
+            return
+    for t1, t2, v in costs:
+        p.spend_resource(t1, v, t2)
+    drops = afk.fast_claim(p, count)
+    before = len(p.d['units'])
+    rewards.grant(p, drops)
+    new_units = [state.unit_info(u) for u in p.d['units'][before:]]
+    p.save()
+    log.info('fast reward x%d on stage %d (paid %s) -> %d reward kinds',
+             count, afk.farm_dungeon(p), costs, len(drops))
+    await s.send(40290, Err.OK, _fast_reward_info(p),
+                 state.resource_sync(p, vecAddUnitInfo=new_units))
 
 
 @handler(30011)
