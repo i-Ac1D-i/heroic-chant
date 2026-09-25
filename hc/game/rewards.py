@@ -54,13 +54,6 @@ def _as_reward(r):
             to_int(r['resource_type3']), to_int(r['val_1'], 0))
 
 
-def star_rewards(dungeon_id):
-    """One-off rewards for the per-stage star missions."""
-    idx = TABLES.index('starSystemReward', 'dungeonID', unique=False)
-    return [(to_int(r['rewardType1']), to_int(r['rewardType2']), -1,
-             to_int(r['rewardVal1'], 0)) for r in idx.get(int(dungeon_id), [])]
-
-
 def grant(player, rewards):
     """Apply rewards to a player; returns the set of touched resource keys."""
     touched = set()

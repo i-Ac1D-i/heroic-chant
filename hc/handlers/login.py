@@ -6,7 +6,7 @@ from .. import config
 from ..net import handler
 from ..protocol.dto import TYPES
 from ..game import (state, gacha, guild, shop, artifacts, scenecards, missions,
-                    mail, guide, achievements, unit_collections)
+                    mail, guide, achievements, unit_collections, stars)
 from ..game.errors import Err
 from ..game.player import Player
 from .center import account_for_device
@@ -93,6 +93,8 @@ async def login(s, a):
     # got the Profile resource add_unit now grants on the way in.
     player.backfill_represent_profiles()
     player.backfill_commanders()
+    # Story stars moved to the records the client actually reads.
+    stars.migrate(player)
     player.save()
     s.account, s.player = account_id, player
 

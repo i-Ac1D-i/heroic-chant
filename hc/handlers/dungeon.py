@@ -5,7 +5,7 @@ from datetime import datetime
 from ..net import handler
 from ..protocol.dto import TYPES
 from ..data.tables import TABLES, to_int
-from ..game import state, rewards, afk
+from ..game import state, rewards, afk, stars
 from ..game.errors import Err
 from ..game.enums import CollectionType
 
@@ -92,18 +92,16 @@ async def dungeon_end(s, a):
                      (int(prev) | (star & 7)) or 1, t2=did)
 
     row = TABLES.dungeon(did) or {}
-    if first:
-        ctype = (CollectionType.HardDungeonStarCount
-                 if to_int(row.get('modeID'), 0) == 1
-                 else CollectionType.NormalDungeonStarCount)
-        p.add_collection(ctype, bin(star & 7).count('1') or 1,
-                         t2=to_int(row.get('floor'), 0))
+    # The stage's own star mask, which is what the stage list and the floor's
+    # x/30 are drawn from -- see hc/game/stars.py.  Each star's one-off reward
+    # is paid the first time that star is earned, not all three on first clear.
+    new_stars = stars.record_stage(p, row, star) if row else 0
     before = len(p.d['units'])
     drops = rewards.roll(did, first_clear=first)
     rewards.grant(p, drops)
     n_new = len(p.d['units']) - before
 
-    star_drops = rewards.star_rewards(did) if first else []
+    star_drops = stars.unpaid_stage_rewards(p, did, new_stars)
     rewards.grant(p, star_drops)
 
     # Account rank gates how far heroes can level, so a stage has to grant it.
@@ -129,6 +127,47 @@ async def dungeon_end(s, a):
                  state.resource_sync(p, vecAddUnitInfo=new_units,
                                      vecChangeUserExp=[exp_total]),
                  star_reward_infos, opened)
+
+
+@handler(30220)
+async def get_dungeon_star_reward(s, a):
+    """Open one of the three star chests under a story floor.
+
+    Sent by StarFloorRewardBox with the stage's modeType (0 Normal, 13 Hard),
+    story season, floor and the chest's GoalCount.  Paid from starSystemReward
+    (the dungeonID -1 rows) once the floor's stars reach the goal, and marked
+    in collection 31/32 with the season's flag -- the same record the client
+    reads to show the chest as opened.  See hc/game/stars.py.
+    """
+    p = s.player
+    mode, season = int(a['_ModeID']), int(a['_StorySeason'])
+    floor, count = int(a['_Floor']), int(a['_StarCount'])
+
+    def reply(err, **extra):
+        return s.send(40242, err, mode, season, floor, count,
+                      state.resource_sync(p, **extra))
+
+    rows = stars.chest_rows(mode, season, floor, count)
+    if not rows or season not in stars.SEASON_FLAG:
+        log.info('no star chest for mode %d season %d floor %d at %d stars',
+                 mode, season, floor, count)
+        await reply(Err.NOT_FOUND)
+        return
+    if stars.chest_claimed(p, mode, season, floor, count):
+        await reply(Err.INVALID)
+        return
+    have = stars.floor_stars(p, mode, season, floor)
+    if have < count:
+        log.info('floor %d chest needs %d stars, has %d', floor, count, have)
+        await reply(Err.LOCKED)
+        return
+    payout = stars.chest_reward(rows)
+    rewards.grant(p, payout)
+    stars.mark_chest(p, mode, season, floor, count)
+    p.save()
+    log.info('floor %d (mode %d, season %d) star chest %d opened: %s',
+             floor, mode, season, count, payout)
+    await reply(Err.OK)
 
 
 @handler(30011)
