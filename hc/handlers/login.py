@@ -27,6 +27,7 @@ def _ack01(player):
         RegDate=state._dt(player.d['reg_date']),
         vecCommanderInfo=state.commander_infos(player),
         vecAddCommandersInfo=state.commanders_infos(player),
+        vecAddCommandersPartyInfo=state.commanders_party_infos(player),
         CommandCenterInfo=state.command_center_info(player),
         IsJoin=True,
         RepresentProfile=player.d['represent_profile'],
@@ -91,6 +92,7 @@ async def login(s, a):
     # Heroes owned since before the Change Main Hero feature existed never
     # got the Profile resource add_unit now grants on the way in.
     player.backfill_represent_profiles()
+    player.backfill_commanders()
     player.save()
     s.account, s.player = account_id, player
 

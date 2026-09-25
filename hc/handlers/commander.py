@@ -90,6 +90,42 @@ async def commanders_level_up(s, a):
         vecAddCommandersInfo=[state.commanders_info(c)]))
 
 
+@handler(30301)
+async def commanders_party_change(s, a):
+    """Put a Command Center lead in a party, or take them out (-1).
+
+    Sent by CommandersSelectUI (and the boss-dungeon team screen).  It had no
+    handler, so the client waited on an Ack that never came and no commander
+    could be brought into battle.  The battle itself reads the assignment on
+    the client (NMUserInfo.GetCommanderPartyInfo), so storing it and echoing
+    it back as vecAddCommandersPartyInfo is all the server does.
+
+    For the three Wave Raid parties (40000-40002) the client allows a lead in
+    only one of them, and clears the other party first with its own -1
+    request -- so nothing here needs to enforce that.
+    """
+    p = s.player
+    party_type = int(a['_PartyType'])
+    commander_id = int(a['_CommanderID'])
+    if commander_id != -1 and p.find_commander(commander_id) is None:
+        log.info('party %d: commander %d is not owned', party_type, commander_id)
+        await s.send(40323, Err.NOT_FOUND, party_type, commander_id,
+                     state.resource_sync(p))
+        return
+    parties = p.d.setdefault('commander_party', {})
+    if commander_id == -1:
+        parties.pop(str(party_type), None)
+    else:
+        parties[str(party_type)] = commander_id
+    p.save()
+    log.info('party %d now brings commander %d', party_type, commander_id)
+    # The -1 goes out too: the client upserts by PartyType, so that is what
+    # clears its copy.
+    await s.send(40323, Err.OK, party_type, commander_id, state.resource_sync(
+        p, vecAddCommandersPartyInfo=[state.commanders_party_info(party_type,
+                                                                  commander_id)]))
+
+
 @handler(30299)
 async def command_center_level_up(s, a):
     """Levels the Command Center building itself, not a specific commander -

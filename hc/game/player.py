@@ -18,6 +18,10 @@ ACCOUNTS_DIR = os.path.join(
 
 _LOCK = threading.Lock()
 
+# The Command Center's three leads (commandersStatInfo CommandersID): Sarah
+# Coldwell, Catherine and Demitt.  Every account has all three.
+STARTING_COMMANDERS = (0, 1, 2)
+
 # What a brand new account starts with.
 STARTING_RESOURCES = {
     ResourceType.Gold: 5_000_000,
@@ -189,9 +193,8 @@ class Player(object):
             'cleared': {},          # dungeon_id -> star flag bitmask
             'collections': {},      # "t1:t2:t3" -> counter (see CollectionType)
             'tutorials': list(range(1, 200)),   # skip the tutorial gate
-            'commanders': [{'id': 0, 'level': 1, 'tier': 1},
-                           {'id': 1, 'level': 1, 'tier': 1},
-                           {'id': 2, 'level': 1, 'tier': 1}],
+            'commanders': [{'id': cid, 'level': 1, 'tier': 1}
+                           for cid in STARTING_COMMANDERS],
             'artifacts': [],     # Artifacts: per-instance, not wallet rows
             'scenecards': [],    # Relics (Scene Cards): likewise
             'forge': {},         # craft slots, keyed by slot index
@@ -301,6 +304,16 @@ class Player(object):
                                to_int(pr_row['ResourceVal1'], 0),
                                to_int(pr_row['ResourceType2']),
                                to_int(pr_row['ResourceType3']))
+
+    def backfill_commanders(self):
+        """Saves from before the Command Center was implemented carry only
+        commander 1, so Sarah Coldwell (0) and Demitt (2) could not be levelled
+        or brought into a party.  Adds whichever of the three a new account
+        starts with is missing, at level 1; never touches an existing one."""
+        have = {int(c['id']) for c in self.d.setdefault('commanders', [])}
+        for cid in STARTING_COMMANDERS:
+            if cid not in have:
+                self.d['commanders'].append({'id': cid, 'level': 1, 'tier': 1})
 
     def backfill_represent_profiles(self):
         """`_grant_represent_profile` only ever ran at the moment a unit was

@@ -128,6 +128,48 @@ def main():
         check('the change came back on the wire',
               d['_CheckInfo'].vecAddCommandCenterInfo[0].Level == 1)
 
+        print('\nBringing a commander into battle (CommandersPartyChangeReq)')
+        from hc.handlers import login as login_handler
+        from hc.protocol.dto import encode_packet, decode_packet
+        story = 1
+        d = call(s, 30301, _PartyType=story, _CommanderID=2)
+        check('putting Demitt in a party works', d['Error'] == 0, d['Error'])
+        check('the Ack echoes the party and commander',
+              d['_PartyType'] == story and d['_CommanderID'] == 2)
+        sent = d['_CheckInfo'].vecAddCommandersPartyInfo or []
+        check('and tells the client through vecAddCommandersPartyInfo',
+              [(x.PartyType, x.CommanderID) for x in sent] == [(story, 2)], sent)
+        check('it is saved', Player.load(p.account_id).d['commander_party'] == {'1': 2})
+
+        d = call(s, 30301, _PartyType=40000, _CommanderID=0)
+        check('a second party keeps its own commander',
+              p.d['commander_party'] == {'1': 2, '40000': 0}, p.d['commander_party'])
+
+        ack01 = decode_packet(40000, encode_packet(40000, login_handler._ack01(p)))
+        at_login = sorted((x.PartyType, x.CommanderID)
+                          for x in ack01['ngAck'].vecAddCommandersPartyInfo)
+        check('both go out at login', at_login == [(1, 2), (40000, 0)], at_login)
+
+        d = call(s, 30301, _PartyType=story, _CommanderID=-1)
+        check('-1 takes the commander out', d['Error'] == 0
+              and '1' not in p.d['commander_party'], p.d['commander_party'])
+        sent = d['_CheckInfo'].vecAddCommandersPartyInfo or []
+        check('and the -1 is sent, so the client clears its copy',
+              [(x.PartyType, x.CommanderID) for x in sent] == [(story, -1)], sent)
+
+        d = call(s, 30301, _PartyType=story, _CommanderID=7)
+        check('a commander the account does not have is refused', d['Error'] != 0)
+
+        print('\nOld saves get all three commanders')
+        old = Player.create(900201, 'test-device-commander-old')
+        old.d['commanders'] = [{'id': 1, 'level': 4, 'tier': 1}]
+        old.backfill_commanders()
+        check('Sarah Coldwell and Demitt are added at level 1, Catherine is kept',
+              sorted((c['id'], c['level']) for c in old.d['commanders'])
+              == [(0, 1), (1, 4), (2, 1)], old.d['commanders'])
+        old.backfill_commanders()
+        check('running it again adds nothing', len(old.d['commanders']) == 3)
+
     finally:
         os.environ.pop('HC_SETTINGS', None)
         shutil.rmtree(sandbox, ignore_errors=True)

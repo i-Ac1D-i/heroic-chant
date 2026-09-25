@@ -114,6 +114,25 @@ def commanders_infos(player):
     return [commanders_info(c) for c in player.d.get('commanders', [])]
 
 
+def commanders_party_info(party_type, commander_id):
+    """NGCommandersPartyInfo -- which Command Center lead a party brings.
+
+    The client keeps these in NMUserInfo.vecCommandersPartyInfo and upserts
+    by PartyType (NMUserInfo.AddCommanderParty @0x13AACF8); a party with no
+    entry, or with CommanderID -1, has no commander
+    (GetCommanderPartyInfo @0x13AAEC8 returns -1).
+    """
+    return TYPES['NGCommandersPartyInfo'](PartyType=int(party_type),
+                                          CommanderID=int(commander_id))
+
+
+def commanders_party_infos(player):
+    return [commanders_party_info(pt, cid)
+            for pt, cid in sorted((player.d.get('commander_party') or {}).items(),
+                                  key=lambda kv: int(kv[0]))
+            if int(cid) >= 0]
+
+
 def command_center_info(player):
     return TYPES['NGCommandCenterInfo'](Level=player.d.get('command_center_level', 0))
 
