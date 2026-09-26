@@ -6,7 +6,8 @@ from .. import config
 from ..net import handler
 from ..protocol.dto import TYPES
 from ..game import (state, gacha, guild, shop, artifacts, scenecards, missions,
-                    mail, guide, achievements, unit_collections, stars)
+                    mail, guide, achievements, unit_collections, stars,
+                    select_gacha)
 from ..game.errors import Err
 from ..game.player import Player
 from .center import login_account
@@ -118,7 +119,8 @@ async def login(s, a):
     await s.send(40002, TYPES['NGLogInAck03'](
         vecAwakenStat=[TYPES['NGAwakenStat'](AwakenStatID=int(sid), State=1)
                        for sid in player.awaken_stats()],
-        vecDungeonOpenEnable=open_enables(player)))
+        vecDungeonOpenEnable=open_enables(player),
+        vecSelectGacha=select_gacha.infos(player)))
     await s.send(40003, TYPES['NGLogInAck04'](customStringData=''))
     shop_info, shop_goods_info, count_price = shop.shop_tables()
     await s.send(40004, TYPES['NGLogInAck05'](

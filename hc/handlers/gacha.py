@@ -6,7 +6,7 @@ import os
 from ..net import handler
 from ..protocol.dto import TYPES
 from ..data.tables import TABLES, to_int
-from ..game import state, gacha, rewards, missions
+from ..game import state, gacha, rewards, missions, select_gacha
 from ..game.errors import Err
 
 log = logging.getLogger('hc.gacha')
@@ -297,3 +297,55 @@ async def reduce_summon_timer(s, a):
 @handler(30285)
 async def gacha_simulation_no_update(s, a):
     await s.send(40307, Err.OK)
+
+
+# --------------------------------------------------------------------------
+# Selective Cube -- reroll freely, claim once.  See hc/game/select_gacha.py.
+
+@handler(30269)
+async def select_gacha_roll(s, a):
+    """A fresh ten-hero roll.  Nothing is granted until the claim."""
+    p, gid = s.player, int(a['GachaID'])
+    err = select_gacha.can_open(p, gid)
+    if err:
+        log.info('selective cube %d refused: %d', gid, err)
+        await s.send(40291, err, [])
+        return
+    results = select_gacha.roll(gid)
+    if not results:
+        await s.send(40291, select_gacha.INFO_MISSING, [])
+        return
+    select_gacha.remember_roll(p, gid, results)
+    p.save()
+    log.info('selective cube %d rolled: %s', gid,
+             ', '.join('%s(%d)' % (_name(u), r) for u, r in results))
+    await s.send(40291, Err.OK, [state.resource_info(1, u, -1, 1) for u, _r in results])
+
+
+@handler(30270)
+async def select_gacha_claim(s, a):
+    """Keep the last roll.  Duplicates convert to shards like any summon; the
+    client's text says these don't count for summon missions, so they don't."""
+    p, gid = s.player, int(a['GachaID'])
+    err = select_gacha.can_open(p, gid)
+    results = select_gacha.pending(p, gid)
+    if not err and not results:
+        err = select_gacha.NO_ROLL
+    if err:
+        log.info('selective cube %d claim refused: %d', gid, err)
+        await s.send(40292, err, state.resource_sync(p), select_gacha.infos(p))
+        return
+    added = []
+    for uid, rare in results:
+        unit, shards = gacha.grant(p, uid, rare)
+        if unit is not None:
+            added.append(unit)
+        else:
+            rewards.grant(p, shards)
+    select_gacha.mark_claimed(p, gid)
+    p.save()
+    log.info('selective cube %d claimed: %d new heroes, %d duplicates',
+             gid, len(added), len(results) - len(added))
+    await s.send(40292, Err.OK,
+                 state.resource_sync(p, vecAddUnitInfo=[state.unit_info(u) for u in added]),
+                 select_gacha.infos(p))
