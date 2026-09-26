@@ -178,7 +178,7 @@ def main():
         back = decode_packet(40041, body)
         check('CheckEventInfoAck carries them and round-trips',
               not back.get('_trailing')
-              and [int(e.Arg1) for e in back['_EventInfo'].vecEventInfo] == [1, 2])
+              and [int(e.Arg1) for e in back['_EventInfo'].vecEventInfo if e.ID == 103] == [1, 2])
 
         print('\nevery shape survives the marshaller')
         for parts in ('none', 'wallet', 'collections', 'units', 'dimension',

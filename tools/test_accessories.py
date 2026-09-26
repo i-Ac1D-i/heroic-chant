@@ -87,6 +87,12 @@ def main():
         check('without tickets a single costs 80 diamonds',
               d['Error'] == 0 and p.total_cash() == 920, p.total_cash())
 
+        from hc.game import events
+        ev = sorted(events.equip_events(), key=lambda e: e.UID)
+        check('the Equipment Summon is announced: type-105 events for the 1x and 10x groups',
+              [(e.ID, int(e.Arg1), int(acc.gacha_row(int(e.Arg1))['GachaCount'])) for e in ev]
+              == [(105, 101, 1), (105, 102, 10)], ev)
+
         print('\nfrom rewards, mail and old saves')
         before = len(p.accessories())
         rewards.grant(p, [(137, 200005, -1, 2)])

@@ -18,6 +18,11 @@ falling back to a date long past when no event names the banner -- which
 dissipated. Moving onto Dimension Select Page." (string 1106) straight after
 every pull.  That popup was never about the cube; it was the missing event.
 
+EVENT_ID_105 -- the Equipment Summon.  ``DimensionGachaTabEquipItemUI.InitUI``
+@0x1A360C0 takes every type-105 event, orders them by UID, reads Arg1 as an
+``AcceGachaGroup`` and splits them by ``GachaAcceList.GachaCount`` into the 1x
+and the 10x button.  With none, both buttons read "{0}" and do nothing.
+
 Retail ran these on a calendar; here they are simply always on.
 """
 from datetime import datetime, timedelta
@@ -31,6 +36,11 @@ GACHA_EVENT = 103          # EEVENT.EVENT_ID_103
 # Dimension Cube, the standard hero banner with the pity gauge.
 HERO_BANNERS = ((1, 15412), (2, 15411))
 
+EQUIP_EVENT = 105          # EEVENT.EVENT_ID_105
+# GachaAcceList groups for the Equipment Summon: 101 is the 1x, 102 the 10x,
+# both from summon group 1 (103/104 are the same pulls from group 2).
+EQUIP_GROUPS = (101, 102)
+
 
 def gacha_events(now=None):
     now = now or datetime.utcnow()
@@ -43,5 +53,16 @@ def gacha_events(now=None):
             for gid, name_id in HERO_BANNERS]
 
 
+def equip_events(now=None):
+    now = now or datetime.utcnow()
+    start, end = now - timedelta(days=1), now + timedelta(days=365)
+    return [TYPES['NGEventInfo'](
+                UID=EQUIP_EVENT * 1000 + group, ID=EQUIP_EVENT,
+                EventListUID=EQUIP_EVENT * 1000 + group, tmStart=start, tmEnd=end,
+                Arg1=str(group), Arg2='', Arg3='', Arg4='', Arg5='', Arg6='',
+                Arg7='', Arg8='', Arg9='')
+            for group in EQUIP_GROUPS]
+
+
 def check_event_info(now=None):
-    return TYPES['NGCheckEventInfo'](vecEventInfo=gacha_events(now))
+    return TYPES['NGCheckEventInfo'](vecEventInfo=gacha_events(now) + equip_events(now))
