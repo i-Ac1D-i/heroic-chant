@@ -160,12 +160,14 @@ def unit_info(u, relics=None):
     and has no other way to learn what it is.  Falls back to ``u['relics']`` so
     a synthesised unit -- an arena bot -- can carry its own.
     """
-    from . import artifacts, scenecards
+    from . import artifacts, scenecards, accessories
     if relics is None:
         relics = u.get('relics') or ()
     cards = u.get('scenecards') or ()
     return TYPES['NGUnitInfo'](
         vecArtifactInfo=[artifacts.info(r) for r in relics],
+        # Accessories ride on the unit too (NGUnitInfo.vecAccessory).
+        vecAccessory=[accessories.info(a) for a in (u.get('accessories') or ())],
         # Relics (Scene Cards) ride on the unit for the same reason artifacts
         # do: an opponent's client owns none of them and cannot look them up.
         vecSceneCardInfo=[scenecards.info(c) for c in cards],
@@ -217,10 +219,22 @@ def unit_infos(player, units=None):
     """
     worn = worn_relics(player)
     cards = worn_scenecards(player)
+    rings = worn_accessories(player)
     rows = player.d['units'] if units is None else units
-    return [unit_info(dict(u, scenecards=cards.get(int(u['uid']), ())),
+    return [unit_info(dict(u, scenecards=cards.get(int(u['uid']), ()),
+                           accessories=rings.get(int(u['uid']), ())),
                       worn.get(int(u['uid']), ()))
             for u in rows]
+
+
+def worn_accessories(player):
+    """{unit uid: [accessory, ...]} for every accessory the player is wearing."""
+    out = {}
+    for a in player.accessories():
+        uid = int(a.get('equip', 0) or 0)
+        if uid:
+            out.setdefault(uid, []).append(a)
+    return out
 
 
 def party_info(p):
@@ -319,6 +333,13 @@ def resource_sync(player, only=None, **extra):
     cols = player.take_dirty_collections()
     if cols and 'vecAddCollectionInfo' not in extra:
         extra['vecAddCollectionInfo'] = collection_infos(player, cols)
+    # Accessories minted by whatever this Ack is answering -- a summon, a
+    # reward, mail -- announced wherever they came from.
+    new = player.take_new_accessories()
+    if new:
+        from . import accessories
+        extra['vecAddAccessoryInfo'] = list(extra.get('vecAddAccessoryInfo') or []) \
+            + [accessories.info(a) for a in new]
     # Mail sent from the dashboard while this account is online.  It cannot be
     # written into the save -- the session holds the player in memory and
     # would overwrite it -- so it waits in hc.game.mail's outbox and rides out

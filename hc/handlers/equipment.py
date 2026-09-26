@@ -4,7 +4,7 @@ import random
 
 from ..net import handler
 from ..data.tables import TABLES, to_int
-from ..game import state, equipment, artifacts, scenecards, missions
+from ..game import state, equipment, artifacts, scenecards, missions, accessories
 from ..game.errors import Err
 from ..game.enums import ResourceType
 
@@ -108,6 +108,50 @@ def _equip_scenecard(p, unit, slot, uid, changed):
     return True
 
 
+def _equip_accessory(p, unit, slot, uid, changed):
+    """Put accessory `uid` in slot 13 (earring) or 14 (necklace), or empty it.
+
+    Per-instance like relics: ItemKey is the accessory's UID.  An accessory's
+    own ``itemType`` in AccessoryList is the slot it goes in, so a necklace is
+    refused in the earring slot.  Wearing it takes it off whoever had it.
+    """
+    worn = unit.setdefault('equip', {})
+    acc = None
+    if uid > 0:
+        # Check the new one before touching the old one, so a refusal leaves
+        # the hero exactly as it was.
+        acc = p.find_accessory(uid)
+        if acc is None:
+            log.info('unit %s cannot equip accessory %d: not owned', unit['uid'], uid)
+            return False
+        if accessories.item_type(acc['id']) != int(slot):
+            log.info('accessory %d (%s) does not go in slot %d', uid, acc['id'], slot)
+            return False
+
+    prev = p.accessory_in_slot(unit['uid'], slot)
+    if prev is not None and int(prev['uid']) != uid:
+        prev['equip'] = 0
+        prev['slot'] = 0
+        changed[prev['uid']] = prev
+
+    if acc is None:
+        worn.pop(str(slot), None)
+        return True
+
+    holder = int(acc.get('equip', 0) or 0)
+    if holder and holder != int(unit['uid']):
+        other_unit = p.find_unit(holder)
+        if other_unit is not None:
+            other_unit.setdefault('equip', {}).pop(str(int(acc.get('slot', 0) or 0)), None)
+            log.info('accessory %d taken off unit %s', uid, holder)
+
+    acc['equip'] = int(unit['uid'])
+    acc['slot'] = int(slot)
+    worn[str(slot)] = uid
+    changed[acc['uid']] = acc
+    return True
+
+
 @handler(30007)
 async def unit_equip_change(s, a):
     """The client sends the whole new layout for the units it touched.
@@ -123,7 +167,7 @@ async def unit_equip_change(s, a):
     could never be equipped at all.  They branch off to `_equip_relic`.
     """
     p = s.player
-    touched, arts, relics = {}, {}, {}
+    touched, arts, relics, rings = {}, {}, {}, {}
     for e in a['vecChangeInfo']:
         unit = p.find_unit(e.UnitUID)
         if unit is None:
@@ -142,6 +186,11 @@ async def unit_equip_change(s, a):
 
         if slot in scenecards.SLOTS:
             if _equip_scenecard(p, unit, slot, key, relics):
+                touched[unit['uid']] = unit
+            continue
+
+        if slot in accessories.WEAR_SLOTS:
+            if _equip_accessory(p, unit, slot, key, rings):
                 touched[unit['uid']] = unit
             continue
 
@@ -179,7 +228,8 @@ async def unit_equip_change(s, a):
     await s.send(40012, Err.OK, a['vecChangeInfo'], state.resource_sync(
         p, vecChangeUnitInfo=state.unit_infos(p, list(touched.values())),
         vecChangeArtifactInfo=[artifacts.info(r) for r in arts.values()],
-        vecChangeSceneCard=[scenecards.info(r) for r in relics.values()]))
+        vecChangeSceneCard=[scenecards.info(r) for r in relics.values()],
+        vecChangeAccessoryInfo=[accessories.info(r) for r in rings.values()]))
 
 
 @handler(30013)

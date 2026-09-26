@@ -7,7 +7,7 @@ from ..net import handler
 from ..protocol.dto import TYPES
 from ..game import (state, gacha, guild, shop, artifacts, scenecards, missions,
                     mail, guide, achievements, unit_collections, stars,
-                    select_gacha, events)
+                    select_gacha, events, accessories)
 from ..game.errors import Err
 from ..game.player import Player
 from .center import login_account
@@ -55,6 +55,8 @@ def _large_data(player):
         # with their own UIDs.  Without this the relic screen is empty and
         # nothing can be equipped.
         vecArtifactInfo=artifacts.infos(player),
+        # Accessories: per-instance, like the two above.
+        vecAccessoryInfo=[accessories.info(a) for a in player.accessories()],
         # Relics.  Same story as artifacts: per-instance, own UIDs, and the
         # relic screen is empty without them.
         vecSceneCardInfo=scenecards.infos(player),
@@ -95,6 +97,10 @@ async def login(s, a):
     # got the Profile resource add_unit now grants on the way in.
     player.backfill_represent_profiles()
     player.backfill_commanders()
+    minted = accessories.migrate_wallet(player)
+    if minted:
+        log.info('turned %d wallet accessory row(s) into real accessories', minted)
+    player.take_new_accessories()        # all of them go out in LargeData
     # Story stars moved to the records the client actually reads.
     stars.migrate(player)
     player.save()

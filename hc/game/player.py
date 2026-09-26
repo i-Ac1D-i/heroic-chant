@@ -154,6 +154,9 @@ class Player(object):
         # persisted -- it only tracks what this session still owes the client.
         self._dirty = set()
         self._dirty_collections = set()
+        # Accessories minted since the last sync, to go out as
+        # vecAddAccessoryInfo on the next NGCheckServerInfo.
+        self._new_accessories = []
 
     # -- lifecycle ---------------------------------------------------------
     @classmethod
@@ -419,6 +422,38 @@ class Player(object):
             if int(r.get('equip', 0) or 0) == int(unit_uid)                     and int(r.get('slot', 0) or 0) == int(slot):
                 return r
         return None
+
+    # -- accessories (earrings, necklaces) ------------------------------------
+    # Per-instance like relics; see hc/game/accessories.py.
+    def accessories(self):
+        return self.d.setdefault('accessories', [])
+
+    def find_accessory(self, uid):
+        return next((a for a in self.accessories() if a['uid'] == int(uid)), None)
+
+    def add_accessory(self, acc_id):
+        from . import accessories as acc
+        a = acc.make(self.new_uid(), acc_id)
+        self.accessories().append(a)
+        self._new_accessories.append(a)
+        return a
+
+    def remove_accessory(self, uid):
+        a = self.find_accessory(uid)
+        if a is not None:
+            self.accessories().remove(a)
+        return a
+
+    def accessory_in_slot(self, unit_uid, slot):
+        for a in self.accessories():
+            if int(a.get('equip', 0) or 0) == int(unit_uid) \
+                    and int(a.get('slot', 0) or 0) == int(slot):
+                return a
+        return None
+
+    def take_new_accessories(self):
+        new, self._new_accessories = self._new_accessories, []
+        return new
 
     # -- mail --------------------------------------------------------------
     def posts(self):

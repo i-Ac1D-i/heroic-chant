@@ -63,6 +63,10 @@ def grant(player, rewards):
         if t1 == 1:                      # ResourceType.Unit -> mint a real unit
             player.add_unit(t2 if t2 > 0 else amount)
             continue
+        if t1 == 137:                    # ResourceType.Accessory -> real ones
+            for _ in range(int(amount)):
+                player.add_accessory(t2)
+            continue
         player.add_resource(t1, amount, t2, t3)
         touched.add((t1, t2, t3))
     return touched
