@@ -36,6 +36,7 @@ def _ack01(player):
         vecDimensionGacha=gacha.dimension_gacha(player),
         ngGuildMember=guild.guild_member_dto(player),
         vecAchievementComplete=achievements.claimed(player),
+        vecBossDungeonDailyReward=state.boss_daily_rewards(player),
         WallPaperID=player.d.get('wallpaper_id', 0),
         TeamType=0,
         # The client opens a second connection for PvP; point it back at us so

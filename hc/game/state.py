@@ -234,6 +234,7 @@ SEASON_DAILY, SEASON_WEEKLY = 1, 2
 SEASON_GUILD_WARS, SEASON_GUILD_RAID = 4, 5
 SEASON_WORLD_ARENA, SEASON_ARENA, SEASON_TAG_ARENA = 6, 7, 8
 SEASON_MONTHLY = 9
+SEASON_NEW_BOSS = 10          # Advent Boss
 
 
 def season_values():
@@ -245,6 +246,12 @@ def season_values():
     send anything unless that check is clean.  With no season the arena screen
     opens, lists opponents, accepts a team -- and the Fight button silently
     does nothing, because the client never talks to us at all.
+
+    NewBossDungeon (10) is the Advent Boss rotation:
+    BossDungeonTeamSelectSceneInit.Awake @0x1C9FC08 reads its value
+    unchecked to pick this rotation's group, `(value - 1) % groups + 1`, and
+    without it threw a NullReferenceException, leaving a team screen with
+    every slot locked and no way back.
 
     Retail ran these on a real calendar.  There is no calendar here, so the
     window is simply always open.
@@ -258,7 +265,31 @@ def season_values():
                                    tmStartDate=start, tmEndDate=end)
             for t in (SEASON_DAILY, SEASON_WEEKLY, SEASON_MONTHLY,
                       SEASON_ARENA, SEASON_TAG_ARENA, SEASON_WORLD_ARENA,
-                      SEASON_GUILD_WARS, SEASON_GUILD_RAID)]
+                      SEASON_GUILD_WARS, SEASON_GUILD_RAID, SEASON_NEW_BOSS)]
+
+
+def season_value(season_type):
+    from ..settings import SETTINGS
+    return int(SETTINGS.get('arena.season', 1))
+
+
+def boss_daily_rewards(player):
+    """NGLogInAck01.vecBossDungeonDailyReward: today's count per
+    dailyRewardGroup (16 and 2001, three a day each).
+
+    BossDungeonDailyRewardStateBar.UpdateUI reads
+    NMUserInfo.GetBossDungeonDailyReward(groupID), which is a bare
+    dictionary index -- with no entry for its group the Advent Boss screen
+    throws KeyNotFoundException.  Nothing pays these out yet, so each group
+    goes out at 0.
+    """
+    from ..data.tables import TABLES, to_int
+    done = player.d.get('boss_daily_reward', {})
+    return [TYPES['NGBossDungeonDailyReward'](
+                GropuID=to_int(r['groupID']),
+                RewardCount=int(done.get(str(r['groupID']), 0)),
+                Season=season_value(to_int(r.get('seasonType'), SEASON_DAILY)))
+            for r in TABLES.json('dailyRewardGroup')]
 
 
 def check_info(**kw):
