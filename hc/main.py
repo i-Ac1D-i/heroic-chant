@@ -45,6 +45,8 @@ def main(argv=None):
 
     log = logging.getLogger('hc')
     from . import handlers  # noqa: F401  -- registers everything
+    from . import directory
+    directory.start_refresher()      # shared server lists, in the background
     if not args.no_web:
         # The dashboard is a convenience. A missing or broken one must never
         # stop the game server coming up -- that would turn a config-editor

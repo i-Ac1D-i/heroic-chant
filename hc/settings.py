@@ -130,6 +130,30 @@ DEFAULTS = {
         # loopback.  Empty means no token, which is refused for non-loopback.
         'token': '',
     },
+    'directory': {
+        # The in-game server list (the server switch on the title screen).
+        # See hc/directory.py and docs/SERVERS.md.
+        #
+        # List this server itself.  Turn off to use this install purely as a
+        # list of other people's servers.
+        'include_local': True,
+        # What this server is called in the list: a string-table id, or text
+        # that exactly matches one ("Global", "Japan", a hero's name ...).
+        # The client can only show string-table text.  Empty = config's
+        # SERVER_NAME_STRING_ID ("Global").
+        'local_name': '',
+        # Other servers:
+        #   [{"id": 2, "name": "Japan", "host": "hc.example.org", "port": 21010,
+        #     "recommend": false}]
+        # id: any whole number from 2 up, unique, and never reused -- the
+        # client remembers the player's pick by it.
+        'servers': [],
+        # Shared lists to merge in: URLs of JSON files shaped like
+        #   {"servers": [ ...entries as above... ]}
+        # Entries whose id is already taken are skipped.
+        'lists': [],
+        'refresh_minutes': 15,
+    },
 }
 
 _LOCK = threading.Lock()

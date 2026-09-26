@@ -1456,3 +1456,42 @@ Seen but left: `GuildUnitUI.Init` throws a NullReferenceException on the
 guild screen (TitleUnitID is 0; not pinned down), Cube Dungeon's list throws
 because its season comes from event 5037 and we send no events, and
 `GetPackmanNowInfoReq` / `OpenEventGoodsReq` (event widgets) go unanswered.
+
+## Seventeenth pass: more than one server in the list
+
+Asked for by the user: let anyone add their own server to the game's server
+switch without shipping an APK. It works through the center packets the
+client already has; the how-to is `docs/SERVERS.md`, the mechanics
+`hc/directory.py`. Branch `server-directory` (off `checklist-work`).
+
+What the client allows, read off it:
+
+- `NGNetCenterServer.Connect` only dials the selected *region's*
+  `centerServerIP` (`NMServerInfo.GetServerInfo` returns a
+  `DownloadServerInfo`), and regions are keyed by `ServiceCountryType`, which
+  has four values. So regions can't hold an open list.
+- The *server* level can. `GetServerGroupInfoAck` is a list; picking an entry
+  stores its GroupID and asks the same center
+  `GetConnectGameServerInfoReq(GroupID)`, then dials whatever comes back.
+  `NGServerGroupInfo.CenterServerIp` is never used.
+- `ServerName` goes through int.Parse into SetStringID, so names are
+  string-table text only (resolved from typed text by exact match).
+- The account id comes only from the center: `vecAccountInfo` or
+  `CreateAccountInfoAck`, which the client stores unchecked
+  (@0x1A55724) and then asks for the game server. No login packet carries it.
+
+So the center is a directory now. For a server that isn't this one,
+`CreateAccountInfoReq` is forwarded to that server's own center by a small
+client of the same protocol (`directory.remote_account`), and the answer is
+cached per device. Lists come from settings (`directory.servers`) and shared
+JSON lists (`directory.lists`, refreshed in a background thread). A Servers
+tab on the dashboard edits all of it.
+
+Login now takes the account from the device, not from the AccountID the client
+sends. With several servers, that id can belong to another server, where it
+would be someone else's account. An unlinked device may still claim a save it
+made itself.
+
+`tools/test_directory.py` (36 checks) starts a real second server as a
+subprocess and goes list -> pick -> account -> address -> login on it.
+`HC_ACCOUNTS_DIR` can now move the saves folder (needed for that).

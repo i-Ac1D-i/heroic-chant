@@ -116,6 +116,7 @@
     <button data-tab="arena">Arena</button>
     <button data-tab="newacct">New accounts</button>
     <button data-tab="devices">Devices</button>
+    <button data-tab="servers">Servers</button>
     <button data-tab="raw">Raw settings</button>
   </nav>
   <span class="status" id="status"></span>
@@ -452,6 +453,60 @@
 </section>
 
 <!-- ------------------------------------------------------------------ raw -->
+<section id="servers">
+  <div class="card">
+    <h2>In-game server list</h2>
+    <p class="help">What the server switch on the title screen offers. Picking
+      another server sends the player straight to it, and their account there
+      comes from that server. The game can only show names from its own text
+      table, so type a name that exists in the game (<code>Global</code>,
+      <code>Japan</code>, a hero's name&nbsp;...) or a string id; anything else
+      shows up as the server's id number. An id must stay the same forever:
+      the game remembers the player's pick by it.</p>
+    <div class="row">
+      <div><label><input type="checkbox" id="dirLocal" style="width:auto"> List this server</label></div>
+      <div><label>This server's name</label><input id="dirLocalName" placeholder="Global"></div>
+    </div>
+    <div class="tablewrap"><table id="dirTable">
+      <thead><tr><th>id</th><th>name</th><th>address</th><th>port</th><th>recommended</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div class="row" style="margin-top:10px">
+      <button class="ghost" id="dirAdd">Add a server</button>
+      <button class="act" id="dirSave">Save</button>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Shared lists</h2>
+    <p class="help">Lists other people publish, one URL per line. Each is a JSON
+      file like <code>{"servers": [{"id": 12, "name": "Japan", "host":
+      "hc.example.org", "port": 21010}]}</code>. They are merged in after your
+      own servers; an id that is already taken is skipped.</p>
+    <textarea id="dirLists" style="min-height:80px"></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="act" id="dirSaveLists">Save</button>
+      <button class="ghost" id="dirRefresh">Refresh now</button>
+    </div>
+    <pre class="mono" id="dirListStatus" style="white-space:pre-wrap"></pre>
+  </div>
+  <div class="card">
+    <h2>What players see</h2>
+    <div class="tablewrap"><table id="dirPreview">
+      <thead><tr><th>id</th><th>shown as</th><th>address</th><th>from</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <pre class="mono" id="dirProblems" style="white-space:pre-wrap"></pre>
+  </div>
+  <div class="card">
+    <h2>Only list servers you trust</h2>
+    <p class="help">The game logs in with a device id and nothing else, and it
+      sends the same id to every server. So whoever runs a server you play on
+      could log in as you on any other server. List a server only if you trust
+      the person running it. The list itself never contacts a server; a server
+      hears from you only when you pick it.</p>
+  </div>
+</section>
+
 <section id="raw">
   <div class="card">
     <h2>Everything, as JSON</h2>
@@ -1289,8 +1344,94 @@ function setupCollapsibleCards() {
   });
 }
 
+/* ------------------------------------------------------------ servers --- */
+function dirRow(e) {
+  const tr = document.createElement('tr');
+  const cell = (cls, value, type) => {
+    const td = document.createElement('td');
+    const i = document.createElement('input');
+    i.className = cls; i.value = value == null ? '' : value;
+    if (type) i.type = type;
+    td.appendChild(i); tr.appendChild(td); return i;
+  };
+  cell('d-id', e.id, 'number');
+  cell('d-name', e.name);
+  cell('d-host', e.host);
+  cell('d-port', e.port == null ? 21010 : e.port, 'number');
+  const td = document.createElement('td');
+  const cb = document.createElement('input');
+  cb.type = 'checkbox'; cb.className = 'd-rec'; cb.style.width = 'auto'; cb.checked = !!e.recommend;
+  td.appendChild(cb); tr.appendChild(td);
+  const del = document.createElement('td');
+  const b = document.createElement('button');
+  b.className = 'ghost danger'; b.textContent = 'Remove';
+  b.onclick = () => tr.remove();
+  del.appendChild(b); tr.appendChild(del);
+  $('#dirTable tbody').appendChild(tr);
+}
+function renderServers() {
+  const d = SET.directory || {};
+  $('#dirLocal').checked = d.include_local !== false;
+  $('#dirLocalName').value = d.local_name || '';
+  $('#dirTable tbody').innerHTML = '';
+  (d.servers || []).forEach(dirRow);
+  $('#dirLists').value = (d.lists || []).join('\n');
+}
+function renderDirectory(r) {
+  const tb = $('#dirPreview tbody');
+  tb.innerHTML = '';
+  for (const e of r.servers) {
+    const tr = document.createElement('tr');
+    [e.id, (e.name || '(string ' + e.name_id + ')') + (e.recommend ? '  ★' : ''),
+     e.host + ':' + e.port, e.local ? 'this server' : e.source].forEach(v => {
+      const td = document.createElement('td'); td.textContent = v; tr.appendChild(td);
+    });
+    tb.appendChild(tr);
+  }
+  $('#dirProblems').textContent = r.problems.length ? 'Left out:\n' + r.problems.join('\n') : '';
+  const lists = Object.entries(r.lists || {});
+  $('#dirListStatus').textContent = lists.map(([url, s]) =>
+    url + '\n  ' + (s.error ? 'failed: ' + s.error + (s.count ? ' (keeping ' + s.count + ' from before)' : '')
+                              : s.count + ' servers, fetched ' + (s.fetched || 'never'))).join('\n');
+}
+async function loadDirectory() {
+  try { renderDirectory(await api('/directory')); } catch (e) { toast(e.message, true); }
+}
+$('#dirAdd').onclick = () => {
+  const ids = $$('#dirTable .d-id').map(i => parseInt(i.value, 10)).filter(n => !isNaN(n));
+  dirRow({id: Math.max(1, ...ids) + 1, name: '', host: '', port: 21010});
+};
+$('#dirSave').onclick = async () => {
+  const servers = [];
+  for (const tr of $$('#dirTable tbody tr')) {
+    const id = parseInt(tr.querySelector('.d-id').value, 10);
+    const port = parseInt(tr.querySelector('.d-port').value, 10);
+    const host = tr.querySelector('.d-host').value.trim();
+    if (isNaN(id) || id < 2) return toast('Server ids start at 2 (1 is this server)', true);
+    if (!host) return toast('Server ' + id + ' needs an address', true);
+    if (isNaN(port) || port < 1 || port > 65535) return toast('Server ' + id + ': port must be 1-65535', true);
+    const name = tr.querySelector('.d-name').value.trim();
+    servers.push({id, name: /^\d+$/.test(name) ? parseInt(name, 10) : name, host, port,
+                  recommend: tr.querySelector('.d-rec').checked});
+  }
+  await saveSettings({directory: {include_local: $('#dirLocal').checked,
+                                  local_name: $('#dirLocalName').value.trim(),
+                                  servers}}, 'Server list saved');
+  renderServers(); loadDirectory();
+};
+$('#dirSaveLists').onclick = async () => {
+  const lists = $('#dirLists').value.split('\n').map(x => x.trim()).filter(Boolean);
+  for (const u of lists) if (!/^https?:\/\//i.test(u)) return toast('Lists must be http:// or https:// URLs', true);
+  await saveSettings({directory: {lists}}, 'Shared lists saved');
+  $('#dirRefresh').onclick();
+};
+$('#dirRefresh').onclick = async () => {
+  try { renderDirectory(await post('/directory/refresh', {})); toast('Lists refreshed'); }
+  catch (e) { toast(e.message, true); }
+};
+
 /* --------------------------------------------------------------- boot --- */
-function renderAll() { renderGacha(); renderRewards(); renderNew(); renderArenaSettings(); renderRaw(); }
+function renderAll() { renderGacha(); renderRewards(); renderNew(); renderArenaSettings(); renderServers(); renderRaw(); }
 (async function () {
   try {
     setupCollapsibleCards();
@@ -1304,6 +1445,7 @@ function renderAll() { renderGacha(); renderRewards(); renderNew(); renderArenaS
     await loadAccounts();
     await loadDevices();
     await loadArena();
+    await loadDirectory();
   } catch (e) {
     toast('Could not reach the server: ' + e.message, true);
   }

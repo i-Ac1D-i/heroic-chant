@@ -250,6 +250,8 @@ manifest or the `client-overrides/` overlay.
 `python tools/test_city_search.py` if you touched City Search.
 `python tools/test_not_open.py` if you touched hc/handlers/not_open.py --
 and when you implement one of those modes, delete its line there.
+`python tools/test_directory.py` if you touched the server list, the center
+packets or who a login is (it starts a second server of its own).
 `bash tools/test-termux-setup.sh` if you touched the installer. It's not a unit test suite, it's an
 end-to-end run against a real socket, which for this project catches more.
 

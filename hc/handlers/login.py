@@ -9,7 +9,7 @@ from ..game import (state, gacha, guild, shop, artifacts, scenecards, missions,
                     mail, guide, achievements, unit_collections, stars)
 from ..game.errors import Err
 from ..game.player import Player
-from .center import account_for_device
+from .center import login_account
 from .dungeon import open_enables
 
 log = logging.getLogger('hc.login')
@@ -72,7 +72,7 @@ def _large_data(player):
 @handler(30000)
 async def login(s, a):
     device_id = a['DeviceID']
-    account_id = a['AccountID'] or account_for_device(device_id)
+    account_id = login_account(device_id, a['AccountID'])
     player = Player.load(account_id) or Player.create(account_id, device_id)
     player.d['last_login'] = datetime.utcnow().isoformat(timespec='seconds')
     # A summon cube the client never opened would otherwise sit in

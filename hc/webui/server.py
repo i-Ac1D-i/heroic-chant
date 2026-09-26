@@ -29,14 +29,15 @@ from urllib.parse import urlparse, parse_qs
 from ..settings import SETTINGS, DEFAULTS
 from ..game.player import Player, ACCOUNTS_DIR
 from ..data.tables import TABLES, to_int
-from .. import config
+from .. import config, directory
 
 log = logging.getLogger('hc.web')
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
-INDEX = os.path.join(os.path.dirname(ACCOUNTS_DIR), 'accounts', 'index.json')
-ICONS = os.path.join(os.path.dirname(ACCOUNTS_DIR), 'icons')
-HERO_ICONS = os.path.join(os.path.dirname(ACCOUNTS_DIR), 'hero_icons')
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+INDEX = os.path.join(ACCOUNTS_DIR, 'index.json')
+ICONS = os.path.join(ROOT, 'icons')
+HERO_ICONS = os.path.join(ROOT, 'hero_icons')
 
 # A save is a few hundred KB; an import of one should never be more than a few
 # MB. Anything larger is a mistake or an attack, and reading it would block the
@@ -554,6 +555,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {'effective': SETTINGS.all,
                                         'overrides': SETTINGS.overrides,
                                         'warnings': warnings})
+
+        # ---- server directory ----
+        # What the in-game server switch lists; the entries themselves are
+        # settings (directory.*).  See hc/directory.py.
+        if path in ('/directory', '/directory/refresh'):
+            if path == '/directory/refresh':
+                if method != 'POST':
+                    return self._fail(405, 'POST to refresh')
+                directory.refresh_lists()
+            listed, problems = directory.entries()
+            return self._send(200, {'servers': listed, 'problems': problems,
+                                    'lists': directory.list_status()})
+        if path == '/directory/name':
+            sid = directory.name_id(query.get('q', [''])[0])
+            return self._send(200, {'id': sid, 'text': directory.name_text(sid)})
 
         # ---- arena ----
         # The bot teams themselves live in settings (so they are edited and

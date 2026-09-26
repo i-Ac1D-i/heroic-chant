@@ -12,7 +12,7 @@ from .enums import ResourceType
 from ..data.tables import TABLES, to_int
 from ..settings import SETTINGS
 
-ACCOUNTS_DIR = os.path.join(
+ACCOUNTS_DIR = os.environ.get('HC_ACCOUNTS_DIR') or os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     'accounts')
 
