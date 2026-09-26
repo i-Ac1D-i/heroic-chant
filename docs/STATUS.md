@@ -1471,9 +1471,14 @@ What the client allows, read off it:
   `DownloadServerInfo`), and regions are keyed by `ServiceCountryType`, which
   has four values. So regions can't hold an open list.
 - The *server* level can. `GetServerGroupInfoAck` is a list; picking an entry
-  stores its GroupID and asks the same center
-  `GetConnectGameServerInfoReq(GroupID)`, then dials whatever comes back.
-  `NGServerGroupInfo.CenterServerIp` is never used.
+  stores its GroupID, then the client moves to *that entry's*
+  `CenterServerIp`/`Port` (`NMServerInfo.GetServerInfo` @0x146F748 builds the
+  center address from `CenterServerGroup.GetGroupInfo`), asks it
+  `GetConnectGameServerInfoReq(GroupID)` and dials whatever comes back. The
+  first build put the far server's address there, and on the device picking
+  it swapped the list for the far server's own, with no way back. Every
+  entry now names this server as its center; only the game address points
+  away.
 - `ServerName` goes through int.Parse into SetStringID, so names are
   string-table text only (resolved from typed text by exact match).
 - The account id comes only from the center: `vecAccountInfo` or
@@ -1492,6 +1497,11 @@ sends. With several servers, that id can belong to another server, where it
 would be someone else's account. An unlinked device may still claim a save it
 made itself.
 
-`tools/test_directory.py` (36 checks) starts a real second server as a
+`tools/test_directory.py` (37 checks) starts a real second server as a
 subprocess and goes list -> pick -> account -> address -> login on it.
 `HC_ACCOUNTS_DIR` can now move the saves folder (needed for that).
+
+Confirmed on the emulator with a second server on 21020 listed as "Japan": the
+list shows both, picking Japan gives a fresh account there (made by that
+server, relayed through this one), and picking Global gets the old account
+back.
