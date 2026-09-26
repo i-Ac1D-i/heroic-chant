@@ -51,6 +51,10 @@ NOT_OPEN = (
     (30274, 40296, EVENT, "Heart Heater's Quest House"),
     (30146, 40162, EVENT, 'Guild Labyrinth (open stage)'),
     (30149, 40165, EVENT, 'Guild Labyrinth (battle)'),
+    # Sent by the arena picker (PopupboxArenaSelect) and UIButtonMoveScene,
+    # which only move on to TagPvPScene on success -- so an error leaves the
+    # player on the picker instead of waiting forever.
+    (30173, 40189, EVENT, 'Tag Arena'),
 )
 
 
