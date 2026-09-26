@@ -98,6 +98,14 @@ async def get_invite_guild_info(s, a):
     await s.send(40108, Err.OK, [])
 
 
+@handler(30190)
+async def get_guild_resource_request_list(s, a):
+    """The Resource Exchange board: requests from guild mates and who helped.
+    A guild of one has neither, so it goes out empty rather than unanswered."""
+    p = s.player
+    await s.send(40206, Err.OK if p.d.get('guild') else NOT_IN_GUILD, [], [])
+
+
 @handler(30092)
 async def change_guild_info(s, a):
     p = s.player
