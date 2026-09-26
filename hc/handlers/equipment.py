@@ -20,23 +20,27 @@ def _equip_artifact(p, unit, slot, uid, changed):
     another hero is taken from them -- which is what the client's UI offers.
     """
     worn = unit.setdefault('equip', {})
+    relic = None
+    if uid > 0:
+        # Check the new one before touching the old one, so a refusal leaves
+        # the hero exactly as it was.
+        relic = p.find_artifact(uid)
+        if relic is None:
+            log.info('unit %s cannot equip relic %d: not owned', unit['uid'], uid)
+            return False
+        if artifacts.slot_of(relic['id']) != slot:
+            log.info('relic %d (artifact %s) does not go in slot %d',
+                     uid, relic['id'], slot)
+            return False
+
     prev = p.artifact_in_slot(unit['uid'], slot)
     if prev is not None and int(prev['uid']) != uid:
         prev['equip'] = 0
         changed[prev['uid']] = prev
 
-    if uid <= 0:
+    if relic is None:
         worn.pop(str(slot), None)
         return True
-
-    relic = p.find_artifact(uid)
-    if relic is None:
-        log.info('unit %s cannot equip relic %d: not owned', unit['uid'], uid)
-        return False
-    if artifacts.slot_of(relic['id']) != slot:
-        log.info('relic %d (artifact %s) does not go in slot %d',
-                 uid, relic['id'], slot)
-        return False
 
     holder = int(relic.get('equip', 0) or 0)
     if holder and holder != int(unit['uid']):

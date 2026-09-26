@@ -203,6 +203,33 @@ def main():
         check('and it is the right one',
               worn.vecArtifactInfo[0].UID == relic['uid'])
 
+        # A refused relic must leave the one already in the slot alone.  The
+        # old one used to come off before the new one was checked, so a
+        # refusal left it unequipped while the hero still listed it, and the
+        # Ack told the client it had moved.
+        def still_on(name, d):
+            check(name, relic['equip'] == u['uid']
+                  and u['equip'].get(str(slot)) == relic['uid'],
+                  (relic['equip'], u['equip'].get(str(slot))))
+            check('and the Ack moves nothing',
+                  not (d['_CheckInfo'].vecChangeArtifactInfo or []),
+                  d['_CheckInfo'].vecChangeArtifactInfo)
+
+        missing = max(int(a['uid']) for a in p.artifacts()) + 1000
+        still_on('a relic not owned is refused and the worn one stays on',
+                 equip(u, missing))
+        # Every wearable artifact in 1.2.389 is a weapon (slot 8 is unused),
+        # so the only rows for another slot are the itemType 12 materials.
+        wrong_id = next(to_int(r['artifactID'])
+                        for r in TABLES.sql('artifactListTable')
+                        if to_int(r.get('itemType'), -1) != slot)
+        wrong = p.add_artifact(wrong_id)
+        still_on('a relic that does not go in the slot is refused and the '
+                 'worn one stays on', equip(u, wrong['uid']))
+        check('and the refused one stays off',
+              not int(wrong.get('equip', 0) or 0), wrong.get('equip'))
+        p.remove_artifact(wrong['uid'])
+
         other = p.d['units'][1]
         equip(other, relic['uid'])
         check('moving it to another hero takes it off the first',
