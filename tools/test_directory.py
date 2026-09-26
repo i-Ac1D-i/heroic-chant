@@ -174,6 +174,11 @@ def main():
               all(g.ServerName.isdigit() for g in groups), [g.ServerName for g in groups])
         check('only this server is recommended',
               [g.RecommendServer for g in groups] == [1, 0, 0])
+        check('and every entry names this server as its center, so the client '
+              'stays with this list (it moves to an entry\'s CenterServerIp)',
+              {(g.CenterServerIp, g.CenterServerPort) for g in groups}
+              == {(config.PUBLIC_HOST, config.PORT)},
+              [(g.CenterServerIp, g.CenterServerPort) for g in groups])
         check('the account list only has this server so far',
               [a.ServerGroup for a in d['vecAccountInfo']] == [1], d['vecAccountInfo'])
 

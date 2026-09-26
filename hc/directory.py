@@ -9,10 +9,17 @@ How the 1.2.389 client does it, read off the disassembly:
   has four values, so they cannot carry an open-ended list.
 * The *servers* under a region are ``GetServerGroupInfoAck``: a list of
   ``NGServerGroupInfo``.  Picking one stores its GroupID
-  (``CenterServerGroup.SetGroupID`` + ``Write``) and asks the *same* center
-  ``GetConnectGameServerInfoReq(GroupID)``; the host/port that comes back is the
-  game server the client dials.  ``NGServerGroupInfo.CenterServerIp`` is never
-  dialled.
+  (``CenterServerGroup.SetGroupID`` + ``Write``).  From then on
+  ``NMServerInfo.GetServerInfo`` @0x146F748 builds the center address from
+  *that entry's* ``CenterServerIp``/``CenterServerPort``
+  (``CenterServerGroup.GetGroupInfo``), and the client moves to that center if
+  it isn't the one it is on -- then asks it ``GetConnectGameServerInfoReq``
+  and dials the game server that comes back.  So every entry here names *this*
+  server as its center: the client stays with this list (another server's
+  center would show that server's list, with no way back to a player's own
+  local server), and only the game-server address points elsewhere.  Found on
+  the device: with the far server's address in CenterServerIp, picking it
+  replaced the list with the far server's own.
 * ``ServerName`` goes through ``int.Parse`` into ``NCTMPro.SetStringID``
   (``ServerGroupUIBar.SetServerGroup``): it must be a string-table id, or the
   client throws and login stalls.
@@ -180,9 +187,10 @@ def default_entry():
 
 
 def group_info(entry):
+    # The center is always this server -- see the module docstring.
     return TYPES['NGServerGroupInfo'](
-        GroupID=entry['id'], CenterServerIp=entry['host'],
-        CenterServerPort=entry['port'], ServerName=str(entry['name_id']),
+        GroupID=entry['id'], CenterServerIp=config.PUBLIC_HOST,
+        CenterServerPort=int(config.PORT), ServerName=str(entry['name_id']),
         UserCount=1, RecommendServer=1 if entry['recommend'] else 0)
 
 

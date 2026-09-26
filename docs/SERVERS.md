@@ -90,9 +90,13 @@ For whoever touches this next. The details, with addresses, are in
 
 * The game connects to one "center" server, which is whatever the boot
   server's `real_serverinfo.json` points at: normally your own server. The
-  center's `GetServerGroupInfoAck` is the server list. When you pick an
-  entry, the game asks the same center for that entry's address
-  (`GetConnectGameServerInfoReq`) and connects there directly.
+  center's `GetServerGroupInfoAck` is the server list. Each entry also names
+  a center, and once you pick an entry the game moves to *that* center. So
+  every entry here names your own server as its center. The game stays on
+  your list and only asks it for the picked server's game address
+  (`GetConnectGameServerInfoReq`), then connects there directly. (If an entry
+  named the other server as its center, the game would switch to that
+  server's list and you couldn't get back to your own.)
 * The game learns its account id **only** from the center. For a server that
   isn't this one, the directory asks that server's own center, speaking the
   same protocol as the game, and passes the answer on. It's cached
