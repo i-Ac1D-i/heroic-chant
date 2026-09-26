@@ -127,6 +127,7 @@ async def login(s, a):
                        for sid in player.awaken_stats()],
         vecDungeonOpenEnable=open_enables(player),
         EventInfo=events.check_event_info(),
+        ngLastAccessoryResult=accessories.pending_result(player),
         vecSelectGacha=select_gacha.infos(player)))
     await s.send(40003, TYPES['NGLogInAck04'](customStringData=''))
     shop_info, shop_goods_info, count_price = shop.shop_tables()

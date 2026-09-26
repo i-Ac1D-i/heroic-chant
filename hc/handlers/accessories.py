@@ -1,8 +1,7 @@
 """Accessories: the Equipment Summon, locking and selling.  See hc/game/accessories.py.
 
-Stat reroll (AccessoryStatChangeReq / ...FixReq) and fusion (AccessoryComposeReq)
-are not done yet; until they are, they answer "not open" rather than leave the
-screen waiting.
+Fusion (AccessoryComposeReq) is not done yet; until it is, it answers "not
+open" rather than leave the screen waiting.
 """
 import logging
 
@@ -79,14 +78,51 @@ async def accessory_sell(s, a):
 
 @handler(30204)
 async def accessory_stat_change(s, a):
-    await s.send(40223, NOT_OPEN, state.resource_sync(s.player),
-                 accessories.info(s.player.find_accessory(a['uidBaseAccessory'])
-                                  or {'uid': 0, 'id': 0, 'stats': []}))
+    """Reroll the stats, keeping any locked slot.  The result waits until the
+    player keeps or drops it (30206); the Ack carries it as the accessory's
+    would-be self.  Priced by AccessoryData: LockStatChangeCost if a slot is
+    locked, StatChangeCost if not (Essence of Mana)."""
+    p = s.player
+    acc = p.find_accessory(a['uidBaseAccessory'])
+    blank = {'uid': 0, 'id': 0, 'stats': []}
+    if acc is None or not acc.get('stats'):
+        await s.send(40223, Err.NOT_FOUND, state.resource_sync(p), accessories.info(acc or blank))
+        return
+    slots = {int(x[0]) for x in acc['stats']}
+    locked = [int(x) for x in a['vecLockSlot'] or [] if int(x) in slots]
+    cost = accessories.reroll_cost(acc['id'], bool(locked))
+    if cost is None:
+        await s.send(40223, Err.NOT_FOUND, state.resource_sync(p), accessories.info(acc))
+        return
+    t1, t2, amount = cost
+    if t1 >= 0 and amount > 0 and not p.spend_resource(t1, amount, t2):
+        log.info('reroll of %d refused: needs %d of %d/%d', acc['uid'], amount, t1, t2)
+        await s.send(40223, Err.NOT_ENOUGH, state.resource_sync(p), accessories.info(acc))
+        return
+    acc['pending'] = accessories.reroll(acc, locked)
+    p.save()
+    log.info('accessory %d rerolled (locked %s): %s', acc['uid'], locked, acc['pending'])
+    await s.send(40223, Err.OK, state.resource_sync(p),
+                 accessories.info(acc, stats=acc['pending']))
 
 
 @handler(30206)
 async def accessory_stat_change_fix(s, a):
-    await s.send(40225, NOT_OPEN, state.resource_sync(s.player))
+    """SelectType 1 keeps the reroll, 0 drops it -- the result popup's Fix
+    button sends 1, Cancel and "reroll again" send 0
+    (PopupboxAccessoryStatChangeFix.<Start>b__0..2)."""
+    p = s.player
+    acc = p.find_accessory(a['uidBaseAccessory'])
+    if acc is None:
+        await s.send(40225, Err.NOT_FOUND, state.resource_sync(p))
+        return
+    pending = acc.pop('pending', None)
+    if pending and int(a['SelectType']) == 1:
+        acc['stats'] = pending
+        log.info('accessory %d keeps its reroll', acc['uid'])
+    p.save()
+    await s.send(40225, Err.OK, state.resource_sync(
+        p, vecChangeAccessoryInfo=[accessories.info(acc)]))
 
 
 @handler(30203)

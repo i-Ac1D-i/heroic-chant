@@ -145,6 +145,35 @@ def main():
               and p.get_resource(0) == gold + acc.sell_price(ear)
               and [x.UID for x in d['_CheckInfo'].vecDelAccessoryInfo] == [ear['uid']])
 
+        print('\nrerolling stats')
+        ring = p.add_accessory(200005)                     # grade 5, four stats
+        p.take_new_accessories()
+        before = [list(x) for x in ring['stats']]
+        p.d['resources'].pop('138:-1:-1', None)
+        d = call(s, 30204, uidBaseAccessory=ring['uid'], vecLockSlot=[])
+        check('no Essence of Mana, no reroll', d['Error'] != 0 and 'pending' not in ring)
+        p.add_resource(138, 100)
+        d = call(s, 30204, uidBaseAccessory=ring['uid'], vecLockSlot=[])
+        check('an unlocked reroll costs StatChangeCost (10 for grade 5)',
+              d['Error'] == 0 and p.get_resource(138) == 90, p.get_resource(138))
+        check('the Ack shows the result, but the accessory keeps its stats until fixed',
+              ring['stats'] == before and len(d['ngAccessoryInfo'].vecEffectInfo) == 4
+              and ring.get('pending'))
+        check('login would ask about the pending result',
+              acc.pending_result(p).UID == ring['uid'])
+        call(s, 30206, uidBaseAccessory=ring['uid'], SelectType=0)
+        check('SelectType 0 drops it', ring['stats'] == before and 'pending' not in ring)
+        check('and then nothing is pending (ID -1)', acc.pending_result(p).ID == -1)
+        d = call(s, 30204, uidBaseAccessory=ring['uid'], vecLockSlot=[2])
+        check('a locked reroll costs LockStatChangeCost (50) and keeps slot 2',
+              d['Error'] == 0 and p.get_resource(138) == 40
+              and ring['pending'][1] == before[1], (p.get_resource(138), ring.get('pending')))
+        new = [list(x) for x in ring['pending']]
+        d = call(s, 30206, uidBaseAccessory=ring['uid'], SelectType=1)
+        check('SelectType 1 keeps it, and the client is told',
+              ring['stats'] == new
+              and [len(x.vecEffectInfo) for x in d['_CheckInfo'].vecChangeAccessoryInfo] == [4])
+
         print('\nlogin')
         equip(unit, 14, neck['uid'])
         s2 = FakeSession(p)

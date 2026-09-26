@@ -122,6 +122,45 @@ def info(a, stats=None):
         LockEnable=int(a.get('lock', 0) or 0))
 
 
+def data(acc_id):
+    """AccessoryData for this accessory's grade and slot: reroll and fusion rules."""
+    g, t = grade(acc_id), item_type(acc_id)
+    for r in TABLES.sql('AccessoryData'):
+        if to_int(r['Grade']) == g and to_int(r['itemType']) == t:
+            return r
+    return None
+
+
+def reroll_cost(acc_id, locked):
+    """(type1, type2, amount): ``LockStatChangeCost`` when a slot is kept,
+    else ``StatChangeCost`` -- one or the other, as
+    ``NMUnit.GetAccessoryStatChangeCost(id, useLockSlot)`` @0x14A0C94 picks."""
+    r = data(acc_id)
+    if r is None:
+        return None
+    pre = 'LockStatChangeCost' if locked else 'StatChangeCost'
+    return (to_int(r.get(pre + '_Type1'), -1), to_int(r.get(pre + '_Type2'), -1),
+            to_int(r.get(pre + '_Val1'), 0))
+
+
+def reroll(a, locked_slots, rng=random):
+    """New stats for every slot not in ``locked_slots``; the old ones stay
+    until the player keeps or drops the result (AccessoryStatChangeFixReq)."""
+    keep = {int(s[0]): s for s in a.get('stats') or [] if int(s[0]) in set(locked_slots)}
+    return roll_stats(a['id'], keep=keep, rng=rng)
+
+
+def pending_result(player):
+    """NGLogInAck03.ngLastAccessoryResult: a reroll still waiting for keep or
+    drop, so the client asks again after a relogin.  "None" is ID -1:
+    ``NMUserInfo.CheckAccessoryStatChangeFix`` @0x13A0110 treats null or
+    ID == -1 as nothing pending, and anything else as a result to settle."""
+    for a in player.accessories():
+        if a.get('pending'):
+            return info(a, stats=a['pending'])
+    return TYPES['NGAccessoryInfo'](ID=-1, EquipUnitUID=-1)
+
+
 def sell_price(a):
     from .equipment import sell_price as table_price
     return table_price(RESOURCE, int(a['id']))
