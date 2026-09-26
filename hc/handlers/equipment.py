@@ -64,34 +64,40 @@ def _equip_scenecard(p, unit, slot, uid, changed):
     """
     worn = unit.setdefault('equip', {})
     prev = p.scenecard_in_slot(unit['uid'], slot)
+    relic = None
+    if uid > 0:
+        # Check the new one before touching the old one, so a refusal leaves
+        # the hero exactly as it was.
+        relic = p.find_scenecard(uid)
+        if relic is None:
+            log.info('unit %s cannot equip relic %d: not owned', unit['uid'], uid)
+            return False
+        if not scenecards.slot_open(unit, slot):
+            # The client locks the slot until awakening node 10002 (slot 9) or
+            # 10004 (slot 10) is open, so this only fires for a client that did
+            # not check.  "Can be opened in Awakening Tree" is string 2688.
+            log.info('unit %s relic slot %d is locked (needs awaken node %s)',
+                     unit['uid'], slot, scenecards.SLOT_OPEN_NODE.get(slot))
+            return False
+
+        # Same card id already on this hero in another slot.  Whatever is in
+        # this slot is about to come off, so it does not count.
+        for other in p.scenecards():
+            if (int(other.get('equip', 0) or 0) == int(unit['uid'])
+                    and int(other['uid']) != uid
+                    and (prev is None or int(other['uid']) != int(prev['uid']))
+                    and int(other['id']) == int(relic['id'])):
+                log.info('unit %s already wears relic %s', unit['uid'], relic['id'])
+                return False
+
     if prev is not None and int(prev['uid']) != uid:
         prev['equip'] = 0
         prev['slot'] = 0
         changed[prev['uid']] = prev
 
-    if uid <= 0:
+    if relic is None:
         worn.pop(str(slot), None)
         return True
-
-    relic = p.find_scenecard(uid)
-    if relic is None:
-        log.info('unit %s cannot equip relic %d: not owned', unit['uid'], uid)
-        return False
-    if not scenecards.slot_open(unit, slot):
-        # The client locks the slot until awakening node 10002 (slot 9) or
-        # 10004 (slot 10) is open, so this only fires for a client that did
-        # not check.  "Can be opened in Awakening Tree" is string 2688.
-        log.info('unit %s relic slot %d is locked (needs awaken node %s)',
-                 unit['uid'], slot, scenecards.SLOT_OPEN_NODE.get(slot))
-        return False
-
-    # Same card id already on this hero in another slot.
-    for other in p.scenecards():
-        if (int(other.get('equip', 0) or 0) == int(unit['uid'])
-                and int(other['uid']) != uid
-                and int(other['id']) == int(relic['id'])):
-            log.info('unit %s already wears relic %s', unit['uid'], relic['id'])
-            return False
 
     holder = int(relic.get('equip', 0) or 0)
     if holder and holder != int(unit['uid']):

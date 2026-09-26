@@ -374,6 +374,53 @@ def main():
               len(worn.vecSceneCardInfo or []) == 1)
         check('a worn relic reports its wearer, not -1',
               scenecards.info(relic).EquipUnitUID == hero21['uid'])
+
+        # A refused relic must leave the one already in the slot alone.  The
+        # old one used to come off before the new one was checked, so a
+        # refusal left it unequipped while the hero still listed it.
+        def still_worn(name):
+            check(name, relic['equip'] == hero21['uid']
+                  and relic['slot'] == rslot
+                  and hero21['equip'].get(str(rslot)) == relic['uid'],
+                  (relic['equip'], relic['slot'],
+                   hero21['equip'].get(str(rslot))))
+
+        missing = max(int(r['uid']) for r in p.scenecards()) + 1000
+        d = wear(hero21, missing)
+        still_worn('a relic not owned is refused and the worn one stays on')
+        check('and the client is not told the worn one moved',
+              not (d['_CheckInfo'].vecChangeSceneCard or []),
+              d['_CheckInfo'].vecChangeSceneCard)
+
+        rslot2 = scenecards.SLOTS[1]
+        hero21['awaken'].append(10004)
+        other_id = next(c for c in scenecards.random_pool(4) if c != relic['id'])
+        other = p.add_scenecard(other_id)
+        other_twin = p.add_scenecard(other_id)
+        twin = p.add_scenecard(relic['id'])
+        wear(hero21, other['uid'], rslot2)
+        check('a second relic goes in slot 10',
+              other['equip'] == hero21['uid'] and other['slot'] == rslot2)
+        d = wear(hero21, other_twin['uid'])
+        still_worn('a duplicate card id is refused and the worn one stays on')
+        check('and the duplicate stays off', other_twin['equip'] == 0,
+              other_twin['equip'])
+        check('and the client is not told anything moved',
+              not (d['_CheckInfo'].vecChangeSceneCard or []),
+              d['_CheckInfo'].vecChangeSceneCard)
+        # Swapping in a copy of the card already in that slot is not a
+        # duplicate: the one it replaces is coming off.
+        wear(hero21, twin['uid'])
+        check('a copy of the worn card can replace it in the same slot',
+              twin['equip'] == hero21['uid'] and relic['equip'] == 0
+              and hero21['equip'].get(str(rslot)) == twin['uid'])
+
+        wear(hero21, relic['uid'])
+        wear(hero21, 0, rslot2)
+        for extra in (other, other_twin, twin):
+            p.remove_scenecard(extra['uid'])
+        hero21['awaken'].remove(10004)
+        still_worn('the first relic goes back on')
         wear(hero21, 0)
         check('emptying the slot unequips it', relic['equip'] == 0)
         check('and it reports -1 again',
