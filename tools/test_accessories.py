@@ -130,6 +130,8 @@ def main():
               ear['equip'] == other['uid'] and '13' not in unit.get('equip', {}))
         equip(other, 13, 0)
         check('and it can come off', ear['equip'] == 0 and '13' not in other.get('equip', {}))
+        check('an accessory nobody wears says EquipUnitUID -1 (the hero tab lists only those)',
+              acc.info(ear).EquipUnitUID == -1)
 
         print('\nlocking and selling')
         call(s, 30207, uid=ear['uid'], LockEnable=1)

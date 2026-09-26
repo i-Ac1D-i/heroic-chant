@@ -115,7 +115,10 @@ def info(a, stats=None):
             AccessoryUID=uid, SlotNum=int(slot), StatTypeID=int(stat),
             StatEffectValue=float(value))
             for slot, stat, value in (a.get('stats') if stats is None else stats)],
-        EquipUnitUID=int(a.get('equip', 0) or 0),
+        # -1, not 0, is "not worn": the hero tab's picker keeps only
+        # EquipUnitUID == -1 (NMUserInfo.GetEquipableAccessoryList's
+        # <b__783_1> @0x1617E68), so 0 made every accessory look taken.
+        EquipUnitUID=int(a.get('equip', 0) or 0) or -1,
         LockEnable=int(a.get('lock', 0) or 0))
 
 
