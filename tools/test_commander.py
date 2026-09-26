@@ -37,6 +37,7 @@ def main():
     from hc.data.tables import TABLES, to_int
     import hc.handlers  # noqa: F401  (registers handlers)
     from tools.test_progression import FakeSession, call
+    from hc.handlers.commander import _costs
 
     try:
         p = Player.create(900200, 'test-device-commander')
@@ -53,9 +54,26 @@ def main():
         d = call(s, 30030, commanderID=999)
         check('an unowned commander id is refused', d['Error'] != 0)
 
+        # The client charges the row of the level the commander is *at*
+        # (CanCommandersLevelUp @0x13ACD00), and only while the Command
+        # Center building is above the commander's level.
         row = next(r for r in TABLES.rows('commandersStatInfo', 'CommandersID', 1)
-                  if to_int(r['Level']) == c['level'] + 1)
+                  if to_int(r['Level']) == c['level'])
         rid, val = to_int(row['ResourceID_1']), to_int(row['Val_1'])
+        p.d['resources'] = {}
+        p.add_resource(rid, val, to_int(row.get('ResourceID_1_Type2'), -1))
+        rid2 = to_int(row['ResourceID_2'])
+        if rid2 >= 0:
+            p.add_resource(rid2, to_int(row['Val_2']),
+                           to_int(row.get('ResourceID_2_Type2'), -1))
+        check('the building starts at 0, under the commander', p.d.get('command_center_level', 0) == 0)
+        d = call(s, 30030, commanderID=1)
+        check('a commander at the building\'s level is refused as locked',
+              d['Error'] == 4, d['Error'])
+        check('and nothing was spent',
+              p.get_resource(rid, to_int(row.get('ResourceID_1_Type2'), -1)) == val)
+
+        p.d['command_center_level'] = 5
         p.d['resources'] = {}
         d = call(s, 30030, commanderID=1)
         check('not enough resources is refused', d['Error'] != 0, d['Error'])
@@ -79,8 +97,10 @@ def main():
         top = max(to_int(r['Level'])
                   for r in TABLES.rows('commandersStatInfo', 'CommandersID', 1))
         c['level'] = top
+        p.d['command_center_level'] = top + 1
         d = call(s, 30030, commanderID=1)
         check('levelling past the table\'s top row is refused', d['Error'] != 0)
+        c['level'] = 2
 
         print('\nCommanders Level Up (the packet the screen actually sends)')
         c0 = p.find_commander(0)
@@ -88,8 +108,9 @@ def main():
               c0 is not None, c0)
         d = call(s, 30300, _CommanderID=999)
         check('a truly unowned commander id is refused', d['Error'] != 0)
+        p.d['command_center_level'] = 5
         row0 = next(r for r in TABLES.rows('commandersStatInfo', 'CommandersID', 0)
-                   if to_int(r['Level']) == c0['level'] + 1)
+                   if to_int(r['Level']) == c0['level'])
         for i in (1, 2):
             rid = to_int(row0.get('ResourceID_%d' % i), -1)
             if rid >= 0:
@@ -107,26 +128,59 @@ def main():
               added)
 
         print('\nCommand Center Level Up')
+        # CanCommandCenterLevelUp @0x13AC9A0: the row of the current level
+        # is the cost, and its openCollection must be met.  Level 0 is
+        # 1 000 000 gold once stage 500 is cleared.
+        p = Player.create(900201, 'test-device-commandcenter')
+        s = FakeSession(p)
         check('a fresh account has no building level yet',
               p.d.get('command_center_level', 0) == 0)
-        row = TABLES.row('commandCenterStatInfo', 'Level', 1)
+        row = TABLES.row('commandCenterStatInfo', 'Level', 0)
+        check('level 0 costs 1 000 000 gold and needs stage 500',
+              _costs(row) == [(0, -1, 1000000)]
+              and (to_int(row['openCollection_Type1']), to_int(row['openCollection_Type2']),
+                   to_int(row['openCollection_Value'])) == (0, 500, 1),
+              (_costs(row), row.get('openCollection_Type2')))
+        p.d['resources'] = {}
+        p.add_resource(0, 5000000)
         d = call(s, 30299)
-        check('not enough resources is refused', d['Error'] != 0, d['Error'])
+        check('without stage 500 it is refused as locked', d['Error'] == 4, d['Error'])
+        check('and no gold was spent', p.get_resource(0) == 5000000)
+
+        p.set_collection(0, 7, t2=500)
+        p.d['resources'] = {}
+        d = call(s, 30299)
+        check('with stage 500 but no gold it is refused', d['Error'] == 2, d['Error'])
         check('and the level did not move', p.d.get('command_center_level', 0) == 0)
 
-        i = 1
-        while ('ResourceID_%d' % i) in row:
-            rid = to_int(row['ResourceID_%d' % i], -1)
-            if rid >= 0:
-                p.add_resource(rid, to_int(row['Val_%d' % i]),
-                               to_int(row.get('ResourceID_%d_Type2' % i), -1))
-            i += 1
+        p.add_resource(0, 5000000)
         d = call(s, 30299)
         check('levelling up with enough resources succeeds', d['Error'] == 0, d['Error'])
+        check('it cost exactly the level-0 row: 1 000 000 gold',
+              p.get_resource(0) == 4000000, p.get_resource(0))
         check('the building advanced a level',
               p.d.get('command_center_level') == 1, p.d.get('command_center_level'))
         check('the change came back on the wire',
               d['_CheckInfo'].vecAddCommandCenterInfo[0].Level == 1)
+
+        row1 = TABLES.row('commandCenterStatInfo', 'Level', 1)
+        d = call(s, 30299)
+        check('level 1 now asks for its own row (Security Keys), which is missing',
+              d['Error'] == 2 and to_int(row1['ResourceID_1']) == 165, d['Error'])
+        for i in (1, 2, 3):
+            rid = to_int(row1.get('ResourceID_%d' % i), -1)
+            if rid >= 0:
+                p.add_resource(rid, to_int(row1['Val_%d' % i]),
+                               to_int(row1.get('ResourceID_%d_Type2' % i), -1))
+        d = call(s, 30299)
+        check('and goes through once they are there', d['Error'] == 0, d['Error'])
+        check('the building is at 2', p.d.get('command_center_level') == 2)
+
+        top = max(to_int(r['Level']) for r in TABLES.sql('commandCenterStatInfo'))
+        p.d['command_center_level'] = top
+        d = call(s, 30299)
+        check('the top level (%d) cannot go further' % top, d['Error'] == 3, d['Error'])
+        p.d['command_center_level'] = 2
 
         print('\nBringing a commander into battle (CommandersPartyChangeReq)')
         from hc.handlers import login as login_handler
