@@ -150,6 +150,84 @@ def reroll(a, locked_slots, rng=random):
     return roll_stats(a['id'], keep=keep, rng=rng)
 
 
+# ------------------------------------------------------------------ fusion
+#
+# PopupboxAccessoryFusion: a base, two material slots and one support slot.
+# The success chance shown is AccessoryData.FusionSuccessRatio, per mille
+# (NMUnit.GetAccessoryFusionRatio @0x14A0DE0: 350 = 35%); grade 5 has -1 and
+# cannot be fused.  Support items are ResourceType 150 "Accessory Abrasive",
+# Type2 an AccessorySupport ItemID: Type 1 multiplies ("x1.25" is Value 250,
+# so ratio * (1000 + Value) / 1000), Type 2 adds per mille ("+3%" is 30).
+# Success makes one of FusionResultGroup's accessories (AccessoryFusionRatio:
+# the next grade up) with fresh stats.  The pity is per grade
+# (NGAccessoryComposeRelayPoint.AccessoryRare), capped at ResultRelayPoint
+# (GetAccessoryMaxRelayPoint @0x14A4D24 reads it; grade 1 has none).
+# INFERRED: a failure spends the materials and keeps the base, adds one relay
+# point, and a full relay guarantees the next fusion and empties it.
+SUPPORT = 150
+
+
+def support_row(item_id):
+    return TABLES.row('AccessorySupport', 'ItemID', int(item_id), source='sql')
+
+
+def fusion_ratio(acc_id, support_ids=()):
+    r = data(acc_id)
+    base = to_int((r or {}).get('FusionSuccessRatio'), -1)
+    if base < 0:
+        return -1
+    ratio = float(base)
+    for item_id in support_ids:
+        sup = support_row(item_id)
+        if sup is None:
+            continue
+        kind, value = to_int(sup['Type']), to_int(sup['Value'], 0)
+        if kind == 1:
+            ratio = ratio * (1000 + value) / 1000.0
+        elif kind == 2:
+            ratio += value
+    return min(int(round(ratio)), 1000)
+
+
+def fusion_result(acc_id, rng=random):
+    group = to_int((data(acc_id) or {}).get('FusionResultGroup'), -1)
+    rows = [r for r in TABLES.sql('AccessoryFusionRatio')
+            if to_int(r['FusionResultGroup']) == group]
+    if not rows:
+        return None
+    pick = rng.choices(rows, weights=[max(to_int(r['Frequency'], 1), 1) for r in rows], k=1)[0]
+    return to_int(pick['AccessoryID'])
+
+
+def can_be_material(base, other):
+    """Same grade, and either the same slot or an Imitation (itemType 16)."""
+    return (grade(other['id']) == grade(base['id'])
+            and item_type(other['id']) in (item_type(base['id']), MATERIAL_TYPE))
+
+
+def relay(player, grade_):
+    rec = player.d.setdefault('accessory_relay', {}).get(str(int(grade_)), 0)
+    return int(rec)
+
+
+def set_relay(player, grade_, value):
+    player.d.setdefault('accessory_relay', {})[str(int(grade_))] = int(value)
+
+
+def relay_max(acc_id):
+    return to_int((data(acc_id) or {}).get('ResultRelayPoint'), -1)
+
+
+def relay_info(player, grade_, used=0):
+    return TYPES['NGAccessoryComposeRelayPoint'](
+        AccessoryRare=int(grade_), RelayPoint=relay(player, grade_), UseRelayPoint=int(used))
+
+
+def relay_infos(player):
+    """NGLogInAck02.vecAccessoryComposeRelayPoint."""
+    return [relay_info(player, int(g)) for g in sorted(player.d.get('accessory_relay', {}), key=int)]
+
+
 def pending_result(player):
     """NGLogInAck03.ngLastAccessoryResult: a reroll still waiting for keep or
     drop, so the client asks again after a relogin.  "None" is ID -1:

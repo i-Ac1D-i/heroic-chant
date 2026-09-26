@@ -1,9 +1,9 @@
 """Accessories: the Equipment Summon, locking and selling.  See hc/game/accessories.py.
 
-Fusion (AccessoryComposeReq) is not done yet; until it is, it answers "not
-open" rather than leave the screen waiting.
+Summon, lock, sell, stat reroll and fusion.
 """
 import logging
+import random
 
 from ..net import handler
 from ..game import state, accessories, rewards
@@ -12,7 +12,6 @@ from ..game.enums import ResourceType
 
 log = logging.getLogger('hc.accessories')
 
-NOT_OPEN = -723            # "This event is not open at the moment."
 
 
 @handler(30205)
@@ -127,6 +126,61 @@ async def accessory_stat_change_fix(s, a):
 
 @handler(30203)
 async def accessory_compose(s, a):
-    from ..protocol.dto import TYPES
-    await s.send(40222, NOT_OPEN, False, TYPES['NGAccessoryComposeRelayPoint'](),
-                 state.resource_sync(s.player))
+    """Fusion: a base and two materials of its grade, and optionally an
+    Accessory Abrasive.  See the fusion notes in hc/game/accessories.py."""
+    p = s.player
+    base = p.find_accessory(a['uidBaseAccessory'])
+    mats = [p.find_accessory(u) for u in a['vecMaterialAccessory'] or []]
+    supports = [int(x) for x in a['vecAccessorySupport'] or [] if int(x) > 0]
+    g = accessories.grade(base['id']) if base else 0
+
+    def refuse(err, why):
+        log.info('fusion refused: %s', why)
+        return s.send(40222, err, False, accessories.relay_info(p, g),
+                      state.resource_sync(p))
+
+    if base is None or len(mats) != 2 or any(m is None for m in mats):
+        return await refuse(Err.NOT_FOUND, 'base or materials missing')
+    uids = {base['uid']} | {m['uid'] for m in mats}
+    if len(uids) != 3:
+        return await refuse(Err.INVALID, 'the same accessory twice')
+    if any(m.get('lock') or m.get('equip') for m in mats):
+        return await refuse(Err.INVALID, 'a material is locked or worn')
+    if not all(accessories.can_be_material(base, m) for m in mats):
+        return await refuse(Err.INVALID, 'materials must match the base grade and slot')
+    ratio = accessories.fusion_ratio(base['id'], supports)
+    result_id = accessories.fusion_result(base['id'])
+    if ratio < 0 or result_id is None:
+        return await refuse(Err.INVALID, 'grade %d cannot be fused' % g)
+    for item_id in supports:
+        if p.get_resource(accessories.SUPPORT, item_id) < 1:
+            return await refuse(Err.NOT_ENOUGH, 'no abrasive %d' % item_id)
+    for item_id in supports:
+        p.add_resource(accessories.SUPPORT, -1, item_id)
+
+    cap = accessories.relay_max(base['id'])
+    used = cap > 0 and accessories.relay(p, g) >= cap
+    success = used or random.randrange(1000) < ratio
+    gone = list(mats)
+    for m in mats:
+        p.remove_accessory(m['uid'])
+    if success:
+        wearer, slot = int(base.get('equip', 0) or 0), int(base.get('slot', 0) or 0)
+        p.remove_accessory(base['uid'])
+        gone.append(base)
+        if wearer:
+            unit = p.find_unit(wearer)
+            if unit is not None:
+                unit.setdefault('equip', {}).pop(str(slot), None)
+        made = p.add_accessory(result_id)
+        accessories.set_relay(p, g, 0)
+        log.info('fusion of %d (grade %d, %d%%%s) succeeded -> %d', base['uid'], g,
+                 ratio // 10, ', relay used' if used else '', made['id'])
+    else:
+        if cap > 0:
+            accessories.set_relay(p, g, min(accessories.relay(p, g) + 1, cap))
+        log.info('fusion of %d (grade %d, %d%%) failed; relay %d/%d', base['uid'], g,
+                 ratio // 10, accessories.relay(p, g), cap)
+    p.save()
+    await s.send(40222, Err.OK, bool(success), accessories.relay_info(p, g, used),
+                 state.resource_sync(p, vecDelAccessoryInfo=[accessories.info(x) for x in gone]))

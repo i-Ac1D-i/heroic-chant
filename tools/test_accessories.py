@@ -174,6 +174,58 @@ def main():
               ring['stats'] == new
               and [len(x.vecEffectInfo) for x in d['_CheckInfo'].vecChangeAccessoryInfo] == [4])
 
+        print('\nfusion')
+        check('grade 2 fuses at 20%, x1.25 abrasive makes it 25%, +3% makes it 23%',
+              (acc.fusion_ratio(200002), acc.fusion_ratio(200002, [1]),
+               acc.fusion_ratio(200002, [11])) == (200, 250, 230))
+        check('grade 5 cannot be fused', acc.fusion_ratio(200005) == -1)
+
+        def fresh(acc_id):
+            a = p.add_accessory(acc_id)
+            p.take_new_accessories()
+            return a
+
+        base, m1, m2 = fresh(200002), fresh(200002), fresh(220002)   # 220002: Imitation
+        wrong = fresh(200003)
+        d = call(s, 30203, uidBaseAccessory=base['uid'],
+                 vecMaterialAccessory=[m1['uid'], wrong['uid']], vecAccessorySupport=[])
+        check('a material of another grade is refused, nothing spent',
+              d['Error'] != 0 and p.find_accessory(m1['uid']) is not None)
+
+        import hc.handlers.accessories as acc_handlers
+        real_random = acc_handlers.random
+        class Always(object):
+            def __init__(self, value): self.value = value
+            def randrange(self, n): return self.value
+        try:
+            acc_handlers.random = Always(999)                      # every roll fails
+            d = call(s, 30203, uidBaseAccessory=base['uid'],
+                     vecMaterialAccessory=[m1['uid'], m2['uid']], vecAccessorySupport=[])
+            gone = [x.UID for x in d['_CheckInfo'].vecDelAccessoryInfo]
+            check('a failure spends the materials, keeps the base, and adds a relay point',
+                  d['Error'] == 0 and d['Success'] is False and p.find_accessory(base['uid'])
+                  and sorted(gone) == sorted([m1['uid'], m2['uid']])
+                  and d['relayPoint'].RelayPoint == 1 and d['relayPoint'].AccessoryRare == 2, d)
+            acc.set_relay(p, 2, acc.relay_max(200002))            # pity full
+            m3, m4 = fresh(200002), fresh(200002)
+            d = call(s, 30203, uidBaseAccessory=base['uid'],
+                     vecMaterialAccessory=[m3['uid'], m4['uid']], vecAccessorySupport=[])
+            new = d['_CheckInfo'].vecAddAccessoryInfo or []
+            check('a full relay guarantees success: one grade-3 piece replaces all three',
+                  d['Success'] is True and d['relayPoint'].UseRelayPoint == 1
+                  and [x.ID for x in new] == [200003] and p.find_accessory(base['uid']) is None
+                  and len(d['_CheckInfo'].vecDelAccessoryInfo) == 3, d)
+            check('and the relay starts again', acc.relay(p, 2) == 0)
+            base2, m5, m6 = fresh(210001), fresh(210001), fresh(210001)
+            p.add_resource(150, 1, 5)                                # x10 abrasive
+            acc_handlers.random = Always(349)
+            d = call(s, 30203, uidBaseAccessory=base2['uid'],
+                     vecMaterialAccessory=[m5['uid'], m6['uid']], vecAccessorySupport=[5])
+            check('an abrasive is spent and lifts the odds', d['Success'] is True
+                  and p.get_resource(150, 5) == 0)
+        finally:
+            acc_handlers.random = real_random
+
         print('\nlogin')
         equip(unit, 14, neck['uid'])
         s2 = FakeSession(p)
