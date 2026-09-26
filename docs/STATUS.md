@@ -1408,3 +1408,51 @@ shop tabs (ShopInfo.shopType does not map straight onto
 system, 30067-71), Earrings (accessories: a whole subsystem the inventory
 renders), duo-hero costumes, Guild invite/join and Resource Exchange (guilds
 here are one per player), Guild War battles, and the real-time arenas.
+
+## Sixteenth pass: on the device
+
+The emulator was back, so the checklist work got tried for real, with the
+user tapping and the server/Unity logs doing the watching. Confirmed on
+screen: stage stars and all floor chests, commanders (set, kept, shown in
+battle), the arena points bar and its first mission, guild missions and the
+donation mission. Fixed along the way, each checked on screen afterwards:
+
+- **City Search paid 1/720 of the display.** A farm tick is 5 seconds:
+  `NMUserInfo.GetDungeonRewardTimeObtainableRewardValue` @0x13AB904 is
+  `minutes * val_1 * 12` (plus buff rates we don't have), and
+  `PopupboxSpeedAcquired` keeps `DUNGEON_AUTO_PLAY_REWARD_TIME = 5`. The
+  server counted a tick an hour, for the regular claim and Speed Acquired
+  alike. `afk.roll` now counts whole minutes x 12.
+- **Command Center / commander level-ups were a row off.** The client charges
+  the row of the level you're *at* (`CanCommandCenterLevelUp` @0x13AC9A0,
+  `CanCommandersLevelUp` @0x13ACD00) and checks that row's openCollection:
+  level 0 is 1 000 000 gold once stage 500 is cleared. The server charged
+  level + 1 (138 000 Security Keys). Commanders are capped by the building:
+  it must be above the commander's level.
+- **Create Guild did nothing.** `CreateGuildAck` only stores the guild; the
+  list screen moves to `SceneType.EGuildMain` when a `GetGuildInfoAck` arrives
+  (`GuildListSceneInit` subscribes `OnGetGuildInfoAck`). The server now sends
+  one right after. Guild replies use the client's own codes (-262 already in a
+  guild, -261 rank, -268 not in a guild).
+- **Error 1 closes the game.** errorString 1 is "server under maintenance",
+  and `ShowServerError` has its own branch for it that quits. `Err.NOT_FOUND`
+  was 1, so every not-found reply (40 of them) was a force quit. It's 5 now.
+- **Advent Boss team screen locked up.** `BossDungeonTeamSelectSceneInit.Awake`
+  reads `GetNGSeasonValue(NewBossDungeon = 10)` unchecked; season 10 now goes
+  out with the others. Its list screen's daily bar indexes
+  `GetBossDungeonDailyReward(group)` straight into a dictionary, so login now
+  sends groups 16 and 2001 (`dailyRewardGroup`) at 0. Start still answers
+  "event not open": the battle itself isn't done.
+- **Tag Arena hung the arena picker.** `CheckTagArenaInfoReq` is in the
+  not-open list now; the picker only moves on after a success.
+- Guild Resource Exchange's list gets an empty reply.
+
+The user's account was moved to Season 1, 1-2 on request by running every
+Season 0 stage and 2001 through the real `DungeonEnd` with three stars
+(rewards included); the save before that is in
+`accounts-backup-2026-09-25/1004-before-season1.json`.
+
+Seen but left: `GuildUnitUI.Init` throws a NullReferenceException on the
+guild screen (TitleUnitID is 0; not pinned down), Cube Dungeon's list throws
+because its season comes from event 5037 and we send no events, and
+`GetPackmanNowInfoReq` / `OpenEventGoodsReq` (event widgets) go unanswered.
