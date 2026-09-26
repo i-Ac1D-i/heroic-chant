@@ -184,10 +184,24 @@ def main():
         # ------------------------------------------------------------------
         print('\na guild to test with')
         p.add_resource(ResourceType.Gold, 50_000_000)
-        d = call(s, 30082, _Guild=TYPES['NGGuild'](
+        d = call(s, 30083)
+        check('asking for guild info with no guild says "not joined" (-268), not 1',
+              d['Error'] == -268, d['Error'])
+        n = len(s.sent)
+        new_guild = TYPES['NGGuild'](
             Name='TestGuild', Introduction='', MarkFlag=0, MarkColorIndex=0,
-            JoinRank=1, JoinType=0))
-        check('a guild can be founded', p.d.get('guild') is not None, d)
+            JoinRank=1, JoinType=0)
+        call(s, 30082, _Guild=new_guild)
+        check('a guild can be founded', p.d.get('guild') is not None)
+        replies = [(pid, d['Error']) for pid, d in s.sent[n:]]
+        check('CreateGuildAck is followed by a GetGuildInfoAck, which is what '
+              'moves the guild list screen on to the guild',
+              replies == [(40090, 0), (40091, 0)], replies)
+        check('and that GetGuildInfoAck carries the new guild',
+              s.last()['_Guild'].Name == 'TestGuild', s.last()['_Guild'])
+        d = call(s, 30082, _Guild=new_guild)
+        check('founding a second one says "already joined" (-262), not 1',
+              d['Error'] == -262, d['Error'])
 
         # ------------------------------------------------------------------
         print('\nthe guild missions (MissionType 5 daily, 6 weekly)')

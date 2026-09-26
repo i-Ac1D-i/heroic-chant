@@ -15,18 +15,36 @@ from ..game.enums import ResourceType
 
 log = logging.getLogger('hc.guild')
 
+# The client's own guild messages (errorString): shown as-is by
+# NMPopupBox.ShowServerError.  Error 1 must never be used here -- the client
+# reads it as "server under maintenance" and closes the game.
+ALREADY_IN_GUILD = -262      # "You have already joined the guild ..."
+RANK_TOO_LOW = -261          # "Your level is too low to participate in a Guild."
+NOT_IN_GUILD = -268          # "You haven't joined any guild."
+NO_SUCH_GOODS = -338         # "There is no Info on this merchandise."
+
 
 @handler(30082)
 async def create_guild(s, a):
+    """Found a guild.
+
+    The client's CreateGuildAck only stores the guild (NMUserInfo.SetGuildInfo)
+    and never fires a signal anything listens to; the guild list screen moves
+    on to the guild itself (SceneType.EGuildMain) when a GetGuildInfoAck
+    arrives (GuildListSceneInit.Start subscribes OnGetGuildInfoAck).  So a
+    successful creation is followed by an unrequested GetGuildInfoAck, as the
+    live server must have done -- without it the button did nothing, and a
+    second tap got "already in a guild".
+    """
     p = s.player
     req = a['_Guild']
     if p.d.get('guild'):
-        await s.send(40090, Err.NOT_FOUND, guild.guild_dto(p), state.resource_sync(p))
+        await s.send(40090, ALREADY_IN_GUILD, guild.guild_dto(p), state.resource_sync(p))
         return
     if p.rank() < guild.join_rank_required():
         log.info('rank %d too low to found a guild (needs %d)',
                  p.rank(), guild.join_rank_required())
-        await s.send(40090, Err.INVALID, TYPES['NGGuild'](), state.resource_sync(p))
+        await s.send(40090, RANK_TOO_LOW, TYPES['NGGuild'](), state.resource_sync(p))
         return
     cost = guild.create_cost()
     if not p.spend_resource(ResourceType.Gold, cost):
@@ -49,13 +67,15 @@ async def create_guild(s, a):
     log.info('guild founded: %r (uid %d) for %d gold',
              p.d['guild']['name'], p.d['guild']['uid'], cost)
     await s.send(40090, Err.OK, guild.guild_dto(p), state.resource_sync(p))
+    await s.send(40091, Err.OK, guild.guild_dto(p), guild.guild_member_dto(p),
+                 state.resource_sync(p))
 
 
 @handler(30083)
 async def get_guild_info(s, a):
     p = s.player
     if not p.d.get('guild'):
-        await s.send(40091, Err.NOT_FOUND, TYPES['NGGuild'](), TYPES['NGGuildMember'](),
+        await s.send(40091, NOT_IN_GUILD, TYPES['NGGuild'](), TYPES['NGGuildMember'](),
                      state.resource_sync(p))
         return
     await s.send(40091, Err.OK, guild.guild_dto(p), guild.guild_member_dto(p),
@@ -83,7 +103,7 @@ async def change_guild_info(s, a):
     p = s.player
     g = p.d.get('guild')
     if not g:
-        await s.send(40103, Err.NOT_FOUND, TYPES['NGGuildBase']())
+        await s.send(40103, NOT_IN_GUILD, TYPES['NGGuildBase']())
         return
     req = a['_Guild']
     g['name'] = req.Name or g['name']
@@ -121,7 +141,7 @@ async def guild_donation(s, a):
     p = s.player
     g = p.d.get('guild')
     if not g:
-        await s.send(40106, Err.NOT_FOUND, TYPES['NGGuildBase'](), TYPES['NGGuildMember'](),
+        await s.send(40106, NOT_IN_GUILD, TYPES['NGGuildBase'](), TYPES['NGGuildMember'](),
                      state.resource_sync(p))
         return
 
@@ -170,7 +190,7 @@ async def guild_buff_levelup(s, a):
     p = s.player
     g = p.d.get('guild')
     if not g:
-        await s.send(40229, Err.NOT_FOUND, TYPES['NGGuildBase']())
+        await s.send(40229, NOT_IN_GUILD, TYPES['NGGuildBase']())
         return
     passive = int(a['_PassiveID'])
     buffs = g.setdefault('buffs', {})
@@ -204,7 +224,7 @@ async def buy_guild_buff(s, a):
     p = s.player
     g = p.d.get('guild')
     if not g:
-        await s.send(40154, Err.NOT_FOUND, TYPES['NGGuildBase']())
+        await s.send(40154, NOT_IN_GUILD, TYPES['NGGuildBase']())
         return
     passive = int(a['_PassiveID'])
     entry = g.setdefault('buffs', {}).get(str(passive))
@@ -234,7 +254,7 @@ async def levelup_guild_shop(s, a):
     p = s.player
     g = p.d.get('guild')
     if not g:
-        await s.send(40204, Err.NOT_FOUND, TYPES['NGGuildBase'](), [], [])
+        await s.send(40204, NOT_IN_GUILD, TYPES['NGGuildBase'](), [], [])
         return
     g['shop_level'] = int(g.get('shop_level', 1)) + 1
     p.save()
@@ -250,7 +270,8 @@ async def buy_guild_shop_goods(s, a):
     uid = int(a['_GoodsUID'])
     entry = next((x for x in guild.exchange_entries() if x['uid'] == uid), None)
     if not g or entry is None:
-        await s.send(40205, Err.NOT_FOUND, TYPES['NGGuildShopGoods'](), state.resource_sync(p))
+        await s.send(40205, NOT_IN_GUILD if not g else NO_SUCH_GOODS,
+                     TYPES['NGGuildShopGoods'](), state.resource_sync(p))
         return
 
     bought = int(g.setdefault('shop_buys', {}).get(str(uid), 0))
@@ -301,7 +322,7 @@ async def guild_wars_defense_party_change(s, a):
     g = p.d.get('guild')
     if not g:
         log.info('guild war team change with no guild')
-        await s.send(40273, Err.NOT_FOUND, rows)
+        await s.send(40273, NOT_IN_GUILD, rows)
         return
 
     owned = {int(u['uid']) for u in p.d.get('units', [])}
