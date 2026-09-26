@@ -58,7 +58,10 @@ def main():
     try:
         print('\nHC_GACHA_ACK_PARTS parsing')
         with_parts(None)
-        check('unset means the safe shape', gh._ack_parts() == frozenset())
+        check('unset means the default: dimension, proven clean on the device',
+              gh._ack_parts() == {'dimension'})
+        with_parts('none')
+        check('"none" is the old safe shape', gh._ack_parts() == frozenset())
         with_parts('all')
         check('"all" turns everything on',
               gh._ack_parts() == frozenset(gh.ACK_PARTS))
@@ -93,7 +96,7 @@ def main():
             p._dirty_collections = set()
             return gh.summon_ack_shape(p, banner, added)
 
-        safe, safe_count = shape(None)
+        safe, safe_count = shape('none')
         check('safe shape sends no dimension',
               listlen(safe, 'vecChangeDimensionGacha') == 0)
         check('safe shape announces no unit',
@@ -143,16 +146,42 @@ def main():
               and listlen(every, 'vecAddResourceInfo') == 1
               and every_count.GachaID == banner)
 
-        print('\nthe screen-open shape is untouched')
-        with_parts('all')
+        print('\nthe screen-open shape')
+        with_parts(None)
+        p.clear_gacha_results()
         p._dirty, p._dirty_collections = {one_key}, set()
         opened, open_count = gh.summon_ack_shape(p, -1, [])
-        check('opening the screen ignores the parts entirely',
-              listlen(opened, 'vecChangeDimensionGacha') == 0
-              and open_count.GachaID == -1)
+        banners = opened.vecChangeDimensionGacha or []
+        check('opening the screen sends every banner, with no cube left waiting '
+              '(else the client blocks the next pull)',
+              [b.ID for b in banners] == list(gh.gacha.BANNERS)
+              and all(not b.vecSummon for b in banners) and open_count.GachaID == -1,
+              banners)
+        with_parts('none')
+        opened, _ = gh.summon_ack_shape(p, -1, [])
+        check('and nothing of the sort in the safe shape',
+              listlen(opened, 'vecChangeDimensionGacha') == 0)
+
+        print('\nthe banner events (the "dimension has dissipated" popup)')
+        from hc.game import events
+        evs = events.gacha_events()
+        check('one type-103 event per banner, Arg1 the gacha id',
+              sorted((e.ID, int(e.Arg1)) for e in evs)
+              == [(103, g) for g in gh.gacha.BANNERS], evs)
+        check('running now and for a long while',
+              all(e.tmStart < e.tmEnd and (e.tmEnd - e.tmStart).days > 300 for e in evs))
+        check('every numeric arg the client TryParses is a number',
+              all(x.lstrip('-').isdigit() for e in evs
+                  for x in (e.Arg1, e.Arg2, e.Arg3, e.Arg4, e.Arg5, e.Arg7, e.Arg8)))
+        info = events.check_event_info()
+        body = encode_packet(40041, 0, info)
+        back = decode_packet(40041, body)
+        check('CheckEventInfoAck carries them and round-trips',
+              not back.get('_trailing')
+              and [int(e.Arg1) for e in back['_EventInfo'].vecEventInfo] == [1, 2])
 
         print('\nevery shape survives the marshaller')
-        for parts in (None, 'wallet', 'collections', 'units', 'dimension',
+        for parts in ('none', 'wallet', 'collections', 'units', 'dimension',
                       'banner', 'all'):
             sync, cnt = shape(parts)
             body = encode_packet(40067, 0, sync, cnt, TYPES['NGPairInt2'](),

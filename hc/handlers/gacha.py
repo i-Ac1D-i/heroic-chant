@@ -74,9 +74,17 @@ ACK_DELAY = float(os.environ.get('HC_GACHA_ACK_DELAY', '0') or 0)
 ACK_PARTS = ('wallet', 'collections', 'units', 'dimension', 'banner')
 
 
-def _ack_parts():
-    """Which parts of the fuller Ack to send.  Empty is the safe shape.
+# `dimension` is on by default: tried alone on the device (2026-09-26) it did
+# not throw, and it is what makes the pull play its animation -- without it the
+# client has no cube.  The others are still unproven.
+DEFAULT_ACK_PARTS = frozenset({'dimension'})
 
+
+def _ack_parts():
+    """Which parts of the fuller Ack to send.
+
+    unset                             DEFAULT_ACK_PARTS (`dimension`)
+    HC_GACHA_ACK_PARTS=none           the old safe shape, nothing added back
     HC_GACHA_ACK_PARTS=dimension      just that one
     HC_GACHA_ACK_PARTS=units,banner   those two
     HC_GACHA_ACK_PARTS=all            everything -- the pre-workaround Ack
@@ -86,6 +94,8 @@ def _ack_parts():
     if not raw and os.environ.get('HC_GACHA_RICH_ACK', '0') in ('1', 'yes', 'true'):
         raw = 'all'
     if not raw:
+        return DEFAULT_ACK_PARTS
+    if raw.lower() in ('none', '-', 'safe'):
         return frozenset()
     if raw.lower() in ('all', '*'):
         return frozenset(ACK_PARTS)
@@ -157,9 +167,15 @@ def summon_ack_shape(p, gid, added):
     exactly as it was; ``gid > 0`` is a pull, and is where the parts apply.
     """
     if gid <= 0:
+        # The screen opening.  With `dimension` on, the banners go out as they
+        # are now: join_dimension_gacha has just binned any cube left unopened,
+        # and unless the client hears so it keeps that cube and refuses the
+        # next pull ("The previous progress of Portal was not complete").
+        banners = ([gacha.dimension(p, g) for g in gacha.BANNERS]
+                   if 'dimension' in _ack_parts() else [])
         return (state.resource_sync(p, vecAddUnitInfo=[state.unit_info(u)
                                                        for u in added],
-                                    vecChangeDimensionGacha=[]),
+                                    vecChangeDimensionGacha=banners),
                 gacha.summons_count(p, gid))
 
     # A real pull.  Build the safe shape, then add back only the parts

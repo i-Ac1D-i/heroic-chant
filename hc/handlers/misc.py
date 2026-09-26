@@ -167,7 +167,9 @@ async def get_mission_reward(s, a):
 
 @handler(30036)
 async def check_event_info(s, a):
-    await s.send(40041, Err.OK, TYPES['NGCheckEventInfo']())
+    """The live events -- only the hero summon banners; see hc/game/events.py."""
+    from ..game import events
+    await s.send(40041, Err.OK, events.check_event_info())
 
 
 @handler(30222)
