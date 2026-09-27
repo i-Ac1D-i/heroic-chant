@@ -8,7 +8,7 @@ from ..protocol.dto import TYPES
 from ..game import (state, gacha, guild, shop, artifacts, scenecards, missions,
                     mail, guide, achievements, unit_collections, stars,
                     select_gacha, events, accessories, hero_dungeon,
-                    refills, training_tower)
+                    refills, training_tower, ordeal)
 from ..game.errors import Err
 from ..game.player import Player
 from .center import login_account
@@ -31,6 +31,8 @@ def _ack01(player):
         vecAddCommandersInfo=state.commanders_infos(player),
         vecAddCommandersPartyInfo=state.commanders_party_infos(player),
         vecHeroDungeonClearInfo=hero_dungeon.clear_infos(player),
+        OrdealTowerShopInfo=ordeal.shop_info(player),
+        vecOrdealTowerPlayCount=ordeal.play_count_infos(player),
         CommandCenterInfo=state.command_center_info(player),
         IsJoin=True,
         RepresentProfile=player.d['represent_profile'],
