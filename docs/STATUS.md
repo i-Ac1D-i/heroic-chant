@@ -1671,3 +1671,39 @@ tower 6 (`TowerDungeonInfo`).
   re-rolls it.  Seeded, so it is stable until then.
 
 `hc/game/ordeal.py`, `tools/test_ordeal.py` (29).
+
+### Advent Boss battles
+
+`StartBossDungeonReq` / `EndBossDungeonReq` / `EndNewBossDungeonReq` (30179,
+30180, 30344 -- both ends are answered with `EndBossDungeonAck`, there is no
+other).  Floors are `personalBossInfo` (groups 1-3 of 17, and the newer group
+4, 93010-93017), chained by preDungeonID.  The start charges the floor's
+stamina (129) -- plus a Whale Boss ticket (181) for group 4 -- and syncs it in
+the Start Ack.  The end is sent after losses too (ClearType 1 is a win).  A
+win pays the stage drops, and on the first three wins of the day
+(`dailyRewardGroup` 16) the floor's `dailyReward` rows, returned in
+`_vecDailyReward` and as `vecChangeBossDungeonDailyReward`.  The daily counts
+now carry their day (old saves' bare counts read as "not today").
+`hc/game/boss.py`, `tools/test_boss.py` (17).
+
+### Cube Dungeon
+
+`StartCubeDungeonReq` / `EndCubeDungeonReq` / `GetCubeDungeonFloorRewardReq`
+(30335-30337).  **The mode only opens with a type-5037 event** whose Arg1 is
+the season (`NMEvent.CheckEventCubeDungeon5037Event`); it now goes out with
+the other events.  `cube_dungeon.season` 0 rotates the 24 seasons (2-25) a
+calendar month at a time; a number pins one.  Progress is `NGCubeDungeonInfo`
+(Season, ClearFloor, Received) in `NGLogInAck02` and every Cube Ack; the list
+screen puts the player on ClearFloor + 1 only once Received is 1, so a floor's
+reward (`CubeDungeonInfo` Reward1/2) is taken before the next floor opens.  A
+new season starts the climb over.  Seasons 2-4 cost stamina; 5-25 cost one
+EventCoin 86 a floor, which retail gave through event missions -- the daily
+top-up now hands out 10 (`tickets.extra_daily`).
+`hc/game/cube_dungeon.py`, `tools/test_cube_dungeon.py` (18).
+
+### Daily top-ups, corrected
+
+`ResourceRefresh` has 21 daily rows, not six (Trial Tower tickets, the Whale
+Boss ticket and a dozen event counters among them).  All of them refill now,
+except stamina (129), whose row (+161, cap 1) is the client's level-scaled
+stamina bar rather than a top-up.
