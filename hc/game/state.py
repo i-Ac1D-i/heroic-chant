@@ -326,16 +326,10 @@ def boss_daily_rewards(player):
     BossDungeonDailyRewardStateBar.UpdateUI reads
     NMUserInfo.GetBossDungeonDailyReward(groupID), which is a bare
     dictionary index -- with no entry for its group the Advent Boss screen
-    throws KeyNotFoundException.  Nothing pays these out yet, so each group
-    goes out at 0.
+    throws KeyNotFoundException.  Today's counts, from hc/game/boss.py.
     """
-    from ..data.tables import TABLES, to_int
-    done = player.d.get('boss_daily_reward', {})
-    return [TYPES['NGBossDungeonDailyReward'](
-                GropuID=to_int(r['groupID']),
-                RewardCount=int(done.get(str(r['groupID']), 0)),
-                Season=season_value(to_int(r.get('seasonType'), SEASON_DAILY)))
-            for r in TABLES.json('dailyRewardGroup')]
+    from . import boss
+    return boss.daily_infos(player)
 
 
 def check_info(**kw):
