@@ -41,13 +41,17 @@ INFERRED -- the retail rules lived on the server:
 * Every floor cleared in a run pays its drops once, first-clear drops the
   first time ever (DungeonClearCount keyed by the floor, as story stages).
 * A skip costs one ticket per tower and pays that tower's current floor's
-  repeat drops -- the rewards the popup previews -- without moving it.
+  repeat drops -- the rewards the popup previews -- without moving it.  It
+  needs a saved checkpoint: the client has errorString 1066 "You can't skip
+  because there is no checkpoint", so a tower still on floor 1 cannot skip.
 * The event-day bonus (EEVENT 102/104 rate on one tower's reward) is not sent.
 """
 from ..data.tables import TABLES, to_int
 from .enums import CollectionType
 
 GROUPS = (1, 2, 3, 4, 5)
+NO_TICKET = 1138            # "You don't have enough Dimension Crack Tickets."
+NO_CHECKPOINT = 1066        # "You can't skip because there is no checkpoint."
 STAGE = 29                  # ResourceType.TrainingTowerStage, keyed by tower
 TICKET = 28                 # ResourceType.TrainingTowerTicket, keyed by tower
 TOP = 100

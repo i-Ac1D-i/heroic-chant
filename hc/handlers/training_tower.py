@@ -36,7 +36,7 @@ async def training_tower_start(s, a):
     did = int(r['dungeon_ID'])
     if not p.spend_resource(tt.TICKET, tt.ticket_cost(r), g):
         log.info('dimension crack tower %d: no ticket', g)
-        await s.send(40046, Err.NOT_ENOUGH, did, party)
+        await s.send(40046, tt.NO_TICKET, did, party)
         return
     if party:
         p.set_party(party[0].SlotType,
@@ -84,24 +84,31 @@ async def training_tower_end(s, a):
 @handler(30043)
 async def training_tower_skip(s, a):
     """Skip, for one tower or several: a ticket each, and the tower's current
-    floor's drops -- what the popup previews.  The tower does not move."""
+    floor's drops -- what the popup previews.  The tower does not move, and
+    one still on floor 1 (no checkpoint saved) cannot skip."""
     p = s.player
     refills.top_up(p)
     tt.backfill(p)
-    floors, seen = [], set()
+    floors, seen, err = [], set(), Err.INVALID
     for g in [int(x) for x in a['vecGroupID'] or []]:
         if g in seen or g not in tt.GROUPS:
             continue
         seen.add(g)
-        r = tt.floor(g, tt.current(p, g))
+        idx = tt.current(p, g)
+        r = tt.floor(g, idx)
         if r is None:
+            continue
+        if idx <= 1:
+            log.info('dimension crack skip tower %d: no checkpoint saved yet', g)
+            err = tt.NO_CHECKPOINT
             continue
         if not p.spend_resource(tt.TICKET, tt.ticket_cost(r), g):
             log.info('dimension crack skip tower %d: no ticket', g)
+            err = tt.NO_TICKET
             continue
         floors.append((int(r['dungeon_ID']), False))
     new_units = _pay(p, floors)
     p.save()
     log.info('dimension crack skip: %s', [d for d, _ in floors])
-    await s.send(40048, Err.OK if floors else Err.NOT_ENOUGH,
+    await s.send(40048, Err.OK if floors else err,
                  state.resource_sync(p, vecAddUnitInfo=new_units))

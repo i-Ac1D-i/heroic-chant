@@ -111,7 +111,8 @@ def main():
               and p.get_resource(29, 1) == 4)
         check('three runs, three tickets', p.get_resource(28, 1) == 0, p.get_resource(28, 1))
         d = call(s, 30041, groupID=1, vecPartyInfo=party, iSelectParty=0)
-        check('without a ticket the start is refused', d['Error'] == 2, d['Error'])
+        check('without a ticket the start is refused with the ticket message (1138)',
+              d['Error'] == 1138, d['Error'])
         d = call(s, 30042, groupID=2, dungeonID=20105, AuthEnable=False, iSelectParty=0,
                  _LogString='')
         check('an End for a tower with no run pays nothing',
@@ -128,18 +129,22 @@ def main():
               p.get_resource(29, 3) == 100)
 
         print('\nskip')
-        p.add_resource(28, 1, 2)
         before = p.get_resource(28, 2)
+        d = call(s, 30043, vecGroupID=[2])
+        check('a tower still on floor 1 has no checkpoint to skip from (1066), ticket kept',
+              d['Error'] == 1066 and p.get_resource(28, 2) == before, d['Error'])
+        tt.set_current(p, 2, 4)
         d = call(s, 30043, vecGroupID=[2, 2, 1, 9])
         check('one ticket for tower 2; tower 1 has none; duplicates and junk ignored',
               d['Error'] == 0 and p.get_resource(28, 2) == before - 1
               and p.get_resource(28, 1) == 0, (d['Error'], p.get_resource(28, 2)))
         check('it pays the current floor\'s drops and does not move the tower',
-              bool(d['_CheckInfo'].vecAddResourceInfo) and p.get_resource(29, 2) == 1)
+              bool(d['_CheckInfo'].vecAddResourceInfo) and p.get_resource(29, 2) == 4)
         p.d['resources']['28:2:-1'] = 0
         p.d['resources']['28:3:-1'] = 0
         d = call(s, 30043, vecGroupID=[2, 3])
-        check('with no tickets at all it is refused', d['Error'] == 2, d['Error'])
+        check('with no tickets at all it is refused with the ticket message (1138)',
+              d['Error'] == 1138, d['Error'])
 
         print('\nlogin')
         SETTINGS.set('tickets.daily_refill', True)
