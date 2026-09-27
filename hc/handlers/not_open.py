@@ -36,7 +36,6 @@ EVENT = -723          # "This event is not open at the moment.(-723)"
 # request id, Ack id, error code, what the player tried
 NOT_OPEN = (
     (30158, 40174, FLOOR, 'Hard story stage'),
-    (30041, 40046, FLOOR, 'Dimension Crack (Chaos Crack)'),
     (30164, 40180, FLOOR, 'Trial Tower'),
     (30179, 40195, EVENT, 'Advent Boss'),
     (30335, 40359, FLOOR, 'Cube Dungeon'),

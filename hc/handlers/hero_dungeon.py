@@ -5,7 +5,7 @@ See hc/game/hero_dungeon.py for the rules as the client has them.
 import logging
 
 from ..net import handler
-from ..game import state, rewards, hero_dungeon
+from ..game import state, rewards, refills, hero_dungeon
 from ..game.errors import Err
 
 log = logging.getLogger('hc.hero_dungeon')
@@ -17,6 +17,7 @@ async def hero_dungeon_start(s, a):
     Ack comes back OK (HeroDungeonStartAck: AddParty, CheckServerInfo)."""
     p, did = s.player, int(a['dungeonID'])
     party = a['vecPartyInfo'] or []
+    refills.top_up(p)
     err = hero_dungeon.can_enter(p, did)
     if err:
         log.info('hero dungeon %d refused: %d', did, err)

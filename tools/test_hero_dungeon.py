@@ -58,6 +58,7 @@ def main():
         SETTINGS.set('seasons.calendar', True)
 
         print('\nstarting a stage')
+        SETTINGS.set('tickets.daily_refill', False)    # tickets counted by hand here
         p = Player.create(900500, 'test-device-hd')
         s = FakeSession(p)
         p.d['resources'].pop('26:-1:-1', None)

@@ -140,6 +140,12 @@ DEFAULTS = {
         # the old fixed value (arena.season) with an always-open window.
         'calendar': True,
     },
+    'tickets': {
+        # Top daily tickets back up once a day, the way the client's
+        # ResourceRefresh table says: Dimension Crack 3 per tower, Hero
+        # Dungeon 10, ...  Only ever raises a wallet.  See hc/game/refills.py.
+        'daily_refill': True,
+    },
     'directory': {
         # The in-game server list (the server switch on the title screen).
         # See hc/directory.py and docs/SERVERS.md.

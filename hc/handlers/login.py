@@ -7,7 +7,8 @@ from ..net import handler
 from ..protocol.dto import TYPES
 from ..game import (state, gacha, guild, shop, artifacts, scenecards, missions,
                     mail, guide, achievements, unit_collections, stars,
-                    select_gacha, events, accessories, hero_dungeon)
+                    select_gacha, events, accessories, hero_dungeon,
+                    refills, training_tower)
 from ..game.errors import Err
 from ..game.player import Player
 from .center import login_account
@@ -104,6 +105,10 @@ async def login(s, a):
     player.take_new_accessories()        # all of them go out in LargeData
     # Story stars moved to the records the client actually reads.
     stars.migrate(player)
+    # Today's tickets (ResourceRefresh), and a floor to stand on in every
+    # Dimension Crack tower.
+    refills.top_up(player)
+    training_tower.backfill(player)
     player.save()
     s.account, s.player = account_id, player
 
