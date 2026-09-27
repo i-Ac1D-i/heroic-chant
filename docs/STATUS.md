@@ -1582,3 +1582,92 @@ sell.  NOT yet tried on the device: lock, stat reroll, fusion.
 
 The relic and artifact equip paths had the same "take the old one off before
 checking the new one" bug; fixed in a side session (`55978bc`, `3cd323a`).
+
+## Nineteenth pass: the world modes (desk work, no device)
+
+Branch `checklist-device`.  The user was away, so none of this has been on
+the device yet; every item is client disassembly plus a test suite.  What is
+read off the client and what is a reconstruction is spelled out at the top of
+each module.
+
+### Daily / Weekly / Monthly seasons follow the calendar
+
+`NGSeasonValue` for Daily (1), Weekly (2) and Monthly (9) used to be a fixed
+1 with an always-open window.  The client compares against them to decide
+"this period" -- a Hero Dungeon stage is cleared *today* while its
+`ClearDailySeason` equals the Daily value -- so a value that never changes
+locks such things for good.  Now Daily is the date, Weekly year*100 + ISO
+week, Monthly year*100 + month, each with its real start and end (UTC); the
+other seasons are unchanged.  `seasons.calendar` false goes back to the old
+values.  `state.calendar_season`.
+
+### Hero Dungeon
+
+`HeroDungeonStartReq` / `HeroDungeonEndReq` (30037/30038).  One Hero Dungeon
+ticket (26) per entry (`HeroDungeonTeamSelectInit.Start` builds the cost);
+each stage once a day (`IsEnablePlayHeroDungeonWithUnitID`: never cleared, or
+cleared but not today), unlocking through `preDungeonID`; clears counted in
+`HeroDungeonClearCount` (collection 4) and sent as `NGHeroDungeonClearInfo`
+at login and after each clear.  The skip popups send several stages with
+ClearType 3; INFERRED: a skip costs a ticket and needs the stage cleared
+before.  `hc/game/hero_dungeon.py`, `tools/test_hero_dungeon.py` (17).
+
+### Daily ticket top-ups
+
+Nothing refilled tickets.  The client's `ResourceRefresh` table says which
+come back each Daily season and to what cap: Hero Dungeon 10, Dimension Crack
+3 *per tower*, Arena 5, Alien 10, Roguelike quests 2.  They are topped up at
+login and when a mode that spends them starts; a top-up only ever raises a
+wallet, so the 99-ticket starting wallets stay.  The per-minute `ChargeTime`
+rows are not done.  `tickets.daily_refill` turns it off.
+`hc/game/refills.py`.
+
+### Dimension Crack
+
+`TrainingTowerStartReq` / `EndReq` / `GetTrainingTowerCheckPointRewardReq`
+(30041-30043).  Five towers of 100 floors (`TrainingTowerList`).
+
+- Where a tower stands is resource 29 keyed by tower: the floor to play next
+  (`GetTrainingTowerData(group, it)` is what the team screen fights).  At 0
+  there is no floor at all, so every tower is put on floor 1 at login.
+- The ticket is resource 28 keyed by tower
+  (`TrainingTowerDungeonTeamSelectSceneInit.Start` builds
+  NGResourceInfo(28, group, UseTickCount)); 3 a day.
+- A run climbs floor after floor on one ticket.
+  `TrainingTowerPlayScene.GameEnd` moves straight on after a win unless the
+  floor was a CheckPoint (floors 3, 6, 10, 13, ...), where it reports and
+  stops; a loss reports the floor *before* the lost one.  So an End names the
+  highest floor cleared.
+- INFERRED: every floor cleared in the run pays its drops, and the tower moves
+  past the highest checkpoint reached (the select screen's "next save point").
+  A loss between checkpoints pays but does not move it.
+- Skip: a ticket per tower for the current floor's drops -- what the skip
+  popup previews -- without moving.  Needs a saved checkpoint: errorString
+  1066 is "You can't skip because there is no checkpoint".
+- The event-day bonus (events 102/104) is not sent.
+
+`hc/game/training_tower.py`, `tools/test_training_tower.py` (27).
+
+### Trial Tower
+
+`StartOrdealTowerReq` .. `BuyOrdealTowerShopGoodsReq` (30164-30169).  The main
+tower is 180 floors (group -1), plus 80-floor towers 0-4 and a 10-floor
+tower 6 (`TowerDungeonInfo`).
+
+- A win counts in DungeonClearCount.  The clear reward
+  (`TowerDungeonRewardGroup`) is **claimed** separately and counted in
+  DungeonGetRewardCount (collection 58): the stage select keeps the player on
+  the floor below until its reward is taken (`SetPlayAbleDungeon`).
+- No entry ticket (the team screen checks no cost).  Towers 0-3 and 6 are 3
+  plays a day (ConstValue ORDEALTOWER_GROUPID_n), counted per Daily season in
+  `NGOrdealTowerPlayCount`, sent at login and with every End.  End is sent
+  after losses too.
+- INFERRED: the Standby reward is the highest cleared main floor's
+  `waitRewardGroup`, once a day.
+- The shop (`NGOrdealTowerShop`) now goes out at login.  INFERRED: it runs a
+  calendar week and its stock is rolled from the `TowerShopGoodsInfo` tier the
+  player's main-tower floor has reached (the groupType-0 group always, others
+  by frequency up to goodsCount, one good each); reaching the next tier
+  re-rolls it.  Seeded, so it is stable until then.
+
+`hc/game/ordeal.py`, `tools/test_ordeal.py` (29).
