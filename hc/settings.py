@@ -140,11 +140,20 @@ DEFAULTS = {
         # the old fixed value (arena.season) with an always-open window.
         'calendar': True,
     },
+    'cube_dungeon': {
+        # Which Cube Dungeon season runs (2-25).  0 rotates through them a
+        # calendar month at a time.  A new season starts the climb over.
+        'season': 0,
+    },
     'tickets': {
         # Top daily tickets back up once a day, the way the client's
         # ResourceRefresh table says: Dimension Crack 3 per tower, Hero
         # Dungeon 10, ...  Only ever raises a wallet.  See hc/game/refills.py.
         'daily_refill': True,
+        # Extra daily top-ups of our own, [type1, type2, add, cap].  The
+        # default is the Cube Dungeon's coin (EventCoin 86), one per floor
+        # from season 5 on; retail handed it out through event missions.
+        'extra_daily': [[119, 86, 10, 10]],
     },
     'directory': {
         # The in-game server list (the server switch on the title screen).

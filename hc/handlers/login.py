@@ -8,7 +8,7 @@ from ..protocol.dto import TYPES
 from ..game import (state, gacha, guild, shop, artifacts, scenecards, missions,
                     mail, guide, achievements, unit_collections, stars,
                     select_gacha, events, accessories, hero_dungeon,
-                    refills, training_tower, ordeal)
+                    refills, training_tower, ordeal, cube_dungeon)
 from ..game.errors import Err
 from ..game.player import Player
 from .center import login_account
@@ -123,6 +123,7 @@ async def login(s, a):
     # never complete on the client -- see missions.multi_condition_infos.
     await s.send(40001, TYPES['NGLogInAck02'](
         vecUserGuideMissionChapter=guide.infos(player),
+        userCubeDungeonInfo=cube_dungeon.info(player),
         vecMissionMultiConditionInfo=missions.multi_condition_infos(player),
         vecUserUnitCollection=unit_collections.infos(player),
         roleStatMasteryLevel=player.role_stat_mastery_level(),

@@ -9,10 +9,19 @@ cap (MaxResourceCount).  The rows that matter today:
     30     Arena ticket                +5,  cap 5
     39     Alien ticket                +10, cap 10
     116    Roguelike quest plays       +2,  cap 2
+    126    Trial Tower ticket          +3,  cap 3
+    ...    and a dozen more event and side-mode counters
 
 A top-up only ever raises a wallet: new accounts start with 99 Hero Dungeon
 and Arena tickets, and those are kept.  The table also has ChargeTime (one
-back every N minutes) for a couple of rows; that is not done here.
+back every N minutes) for a couple of rows; that is not done here.  Stamina
+(129) is left alone: its row (+161, cap 1) is not a daily top-up but the
+client's level-scaled stamina bar.
+
+``tickets.extra_daily`` adds rows of our own, [type1, type2, add, cap].  The
+default hands out the Cube Dungeon's coin (EventCoin 86, one a floor from
+season 5 on), which retail gave through event missions this server does not
+run.
 
 Each resource remembers the Daily season it was last topped up in
 (``player.d['refills']``), so calling this more than once a day is free.
@@ -33,9 +42,16 @@ def daily_rows():
             continue
         cap = to_int(r.get('MaxResourceCount'), 0)
         add = to_int(r.get('SeasonAddResourceCount'), 0)
-        if cap > 0 and add > 0:
+        if 0 < add <= cap:
             out.append((to_int(r['ResourceType1']), to_int(r.get('ResourceType2'), -1),
                         add, cap))
+    for extra in SETTINGS.get('tickets.extra_daily', []) or []:
+        try:
+            t1, t2, add, cap = (int(x) for x in extra)
+        except (TypeError, ValueError):
+            continue
+        if 0 < add and 0 < cap:
+            out.append((t1, t2, add, cap))
     return out
 
 

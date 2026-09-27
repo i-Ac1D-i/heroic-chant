@@ -23,7 +23,10 @@ EVENT_ID_105 -- the Equipment Summon.  ``DimensionGachaTabEquipItemUI.InitUI``
 ``AcceGachaGroup`` and splits them by ``GachaAcceList.GachaCount`` into the 1x
 and the 10x button.  With none, both buttons read "{0}" and do nothing.
 
-Retail ran these on a calendar; here they are simply always on.
+EVENT 5037 -- the Cube Dungeon's season (Arg1).  Without it the mode never
+opens; see hc/game/cube_dungeon.py, which also picks the season.
+
+Retail ran these on a calendar; here the banners are simply always on.
 """
 from datetime import datetime, timedelta
 
@@ -65,4 +68,6 @@ def equip_events(now=None):
 
 
 def check_event_info(now=None):
-    return TYPES['NGCheckEventInfo'](vecEventInfo=gacha_events(now) + equip_events(now))
+    from . import cube_dungeon
+    return TYPES['NGCheckEventInfo'](vecEventInfo=gacha_events(now) + equip_events(now)
+                                     + [cube_dungeon.event(now)])

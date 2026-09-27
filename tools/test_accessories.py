@@ -101,9 +101,10 @@ def main():
               len(p.accessories()) == before + 2
               and [x.ID for x in sync.vecAddAccessoryInfo] == [200005, 200005])
         p.d['resources']['137:210004:-1'] = 3              # what the dashboard used to write
+        had = sum(1 for a in p.accessories() if a['id'] == 210004)   # the summons may have made some
         check('wallet rows from old saves become accessories',
               acc.migrate_wallet(p) == 3 and '137:210004:-1' not in p.d['resources']
-              and sum(1 for a in p.accessories() if a['id'] == 210004) == 3)
+              and sum(1 for a in p.accessories() if a['id'] == 210004) == had + 3)
         p.take_new_accessories()
 
         print('\nwearing them')
