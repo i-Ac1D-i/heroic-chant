@@ -7,7 +7,7 @@ from ..net import handler
 from ..protocol.dto import TYPES
 from ..game import (state, gacha, guild, shop, artifacts, scenecards, missions,
                     mail, guide, achievements, unit_collections, stars,
-                    select_gacha, events, accessories)
+                    select_gacha, events, accessories, hero_dungeon)
 from ..game.errors import Err
 from ..game.player import Player
 from .center import login_account
@@ -29,6 +29,7 @@ def _ack01(player):
         vecCommanderInfo=state.commander_infos(player),
         vecAddCommandersInfo=state.commanders_infos(player),
         vecAddCommandersPartyInfo=state.commanders_party_infos(player),
+        vecHeroDungeonClearInfo=hero_dungeon.clear_infos(player),
         CommandCenterInfo=state.command_center_info(player),
         IsJoin=True,
         RepresentProfile=player.d['represent_profile'],
