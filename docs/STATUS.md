@@ -1505,3 +1505,80 @@ Confirmed on the emulator with a second server on 21020 listed as "Japan": the
 list shows both, picking Japan gives a fresh account there (made by that
 server, relayed through this one), and picking Global gets the old account
 back.
+
+## Eighteenth pass: the Portal and the accessories (on the device)
+
+Branch `checklist-device` (off `server-directory`).  Each item below was
+tried on the emulator by the user unless it says otherwise.
+
+### The Portal's hero summons
+
+- **Selective Cube** (GachaID 1000, the Hero Summon tab's default banner):
+  `SelectGachaInstantSummonReq` (30269) / `SelectGachaRewardReq` (30270) had no
+  handler, so the tab sat under a touch-blocking overlay.  A roll is ten heroes
+  -- one SS, one to three S, the rest A (`GachaSelectSummon`, and the client's
+  own text, strings 34523-34529) -- rerolled freely; only the claim grants
+  them, once (`ReSummonMinute` is a year).  The claim is `NGSelectGacha`, sent
+  again at login in `NGLogInAck03.vecSelectGacha`.  Errors are the client's
+  -900..-904.  `hc/game/select_gacha.py`, `tools/test_select_gacha.py`.
+  CONFIRMED on the device (roll, reroll, claim).
+- **"The Dimension has dissipated" (string 1106) after every pull** was never
+  about the cube.  `NGDimensionGacha.GetGachaEndTime` @0x1A51FF4 is
+  `min(tmRenewLastGacha + ReSummonMinute, the banner's type-103 event tmEnd)`
+  and falls back to a date long past when no event names the banner, which
+  `DimensionGachaTabHeroUI` <Start>b__16 reads as "dissipated".  Type-103 events
+  for the Time Cube (1) and the Dimension Cube (2) now go out at login
+  (`NGLogInAck03.EventInfo`) and in `CheckEventInfoAck`; the Dimension Cube
+  banner appeared with them.  `hc/game/events.py`.  CONFIRMED for the
+  Dimension Cube; the Time Cube's second pull needs its daily count (3) reset.
+- **The summon Ack experiment**: the `dimension` part alone did not throw, and
+  it is what plays the pull animation, so it is the default now
+  (`HC_GACHA_ACK_PARTS=none` for the old safe shape).  The screen-open Ack
+  sends the banners too, so a cube left unopened stops blocking the next pull
+  ("The previous progress of Portal was not complete").  `units`,
+  `collections`, `wallet` and `banner` are still untried -- so a genuinely new
+  hero from a banner still shows up only after a relogin.
+- Seen, not fixed: `PopupboxDimensionGachaTimeReduce` throws
+  ArgumentOutOfRangeException adding to a DateTime (the Time Cube's
+  time-reduce popup).
+
+### Accessories (earrings and necklaces) and the Equipment Summon
+
+The Equipment Summon is `AccessoryGachaReq` (30205), and accessories were not
+implemented at all -- which is also why earrings added from the dashboard never
+showed up: they sat in the wallet as ResourceType 137 rows.
+
+- Per-instance like relics (`hc/game/accessories.py`): stats rolled from
+  `AccessoryList` / `AccessoryRandStatSelect` / `AccessoryRandStatRange`
+  (grades 1-5 carry 1/1/2/3/4 distinct stats; slots numbered from 1).  At login
+  in `LoginAckLargeData.vecAccessoryInfo`, worn ones in `NGUnitInfo.vecAccessory`,
+  and every newly minted one goes out as `vecAddAccessoryInfo` through
+  `state.resource_sync` whatever minted it (summon, reward, mail).  Wallet 137
+  rows in old saves are converted at login.
+- **"Not worn" is `EquipUnitUID -1`**, not 0: the hero tab's picker
+  (`GetEquipableAccessoryList`) keeps only -1, so 0 made the list empty.
+- Worn through `UnitEquipInfoChangeReq` in slots 13 (earring) / 14 (necklace),
+  UID as ItemKey.  Locked (30207) and sold (30209, ResourceTable SellGold).
+- The Equipment Summon's buttons come from **type-105 events** (Arg1 an
+  `AcceGachaGroup`, split by `GachaCount` into 1x/10x); with none they read
+  "{0}" and send nothing.  Groups 101/102 now go out.  A pull rolls
+  `GachaAcceInfo`'s result types, then `GachaAcceSummonGroup`'s rows: about 75%
+  gear, 25% accessories.  Tickets (152/4) first, then 80/750 diamonds.
+- **Stat reroll** (30204/30206): rerolls every unlocked slot, priced
+  `LockStatChangeCost` with a lock else `StatChangeCost`
+  (`GetAccessoryStatChangeCost`), result pending until SelectType 1 keeps it or
+  0 drops it.  A pending result goes out at login as
+  `ngLastAccessoryResult`; "none" is ID -1 (`CheckAccessoryStatChangeFix`).
+- **Fusion** (30203): base + two materials of its grade (same slot or an
+  Imitation), optional Accessory Abrasive (ResourceType 150: `AccessorySupport`
+  Type 1 multiplies the per-mille `FusionSuccessRatio`, Type 2 adds).  Success
+  makes the next grade up; per-grade relay points, capped at
+  `ResultRelayPoint`, sent at login in `NGLogInAck02`.  INFERRED: a failure
+  spends the materials and keeps the base; a full relay guarantees the next.
+
+CONFIRMED on the device: summon, inventory, equip from the hero tab, move,
+sell.  NOT yet tried on the device: lock, stat reroll, fusion.
+`tools/test_accessories.py` (36 checks).
+
+The relic and artifact equip paths had the same "take the old one off before
+checking the new one" bug; fixed in a side session (`55978bc`, `3cd323a`).
