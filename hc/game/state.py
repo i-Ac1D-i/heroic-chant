@@ -267,24 +267,56 @@ def season_values():
     without it threw a NullReferenceException, leaving a team screen with
     every slot locked and no way back.
 
-    Retail ran these on a real calendar.  There is no calendar here, so the
-    window is simply always open.
+    Daily, Weekly and Monthly follow the calendar (``calendar_season``): the
+    client compares against them to decide what is "this period" --
+    ``NMUserInfo.CheckClearHeroDungeonToday`` @0x139B974 is
+    ``CheckSeasonValue(Daily, ClearDailySeason)``, and a fixed value would call
+    a Hero Dungeon stage cleared today for ever.  The daily missions already
+    count days the same way (``missions.period``).  The rest have no calendar
+    here, so their window is simply always open.  ``seasons.calendar`` false
+    goes back to fixed values for everything.
     """
-    from ..settings import SETTINGS
-    from datetime import timedelta
     now = datetime.utcnow()
-    start, end = now - timedelta(days=30), now + timedelta(days=365)
-    season = int(SETTINGS.get('arena.season', 1))
-    return [TYPES['NGSeasonValue'](iSeasonType=t, iSeasonValue=season,
-                                   tmStartDate=start, tmEndDate=end)
+    return [season_info(t, now)
             for t in (SEASON_DAILY, SEASON_WEEKLY, SEASON_MONTHLY,
                       SEASON_ARENA, SEASON_TAG_ARENA, SEASON_WORLD_ARENA,
                       SEASON_GUILD_WARS, SEASON_GUILD_RAID, SEASON_NEW_BOSS)]
 
 
-def season_value(season_type):
+CALENDAR_SEASONS = (SEASON_DAILY, SEASON_WEEKLY, SEASON_MONTHLY)
+
+
+def calendar_season(season_type, now=None):
+    """(value, start, end) of the current Daily / Weekly / Monthly period, UTC."""
+    from datetime import timedelta
+    now = now or datetime.utcnow()
+    day = datetime(now.year, now.month, now.day)
+    if season_type == SEASON_DAILY:
+        return day.toordinal(), day, day + timedelta(days=1)
+    if season_type == SEASON_WEEKLY:
+        year, week, weekday = now.isocalendar()
+        start = day - timedelta(days=weekday - 1)
+        return year * 100 + week, start, start + timedelta(days=7)
+    start = datetime(now.year, now.month, 1)
+    end = datetime(now.year + (now.month == 12), now.month % 12 + 1, 1)
+    return now.year * 100 + now.month, start, end
+
+
+def season_info(season_type, now=None):
     from ..settings import SETTINGS
-    return int(SETTINGS.get('arena.season', 1))
+    from datetime import timedelta
+    now = now or datetime.utcnow()
+    if season_type in CALENDAR_SEASONS and SETTINGS.get('seasons.calendar', True):
+        value, start, end = calendar_season(season_type, now)
+    else:
+        value = int(SETTINGS.get('arena.season', 1))
+        start, end = now - timedelta(days=30), now + timedelta(days=365)
+    return TYPES['NGSeasonValue'](iSeasonType=season_type, iSeasonValue=value,
+                                  tmStartDate=start, tmEndDate=end)
+
+
+def season_value(season_type, now=None):
+    return int(season_info(int(season_type), now).iSeasonValue)
 
 
 def boss_daily_rewards(player):

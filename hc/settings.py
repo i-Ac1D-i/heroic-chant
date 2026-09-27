@@ -130,6 +130,16 @@ DEFAULTS = {
         # loopback.  Empty means no token, which is refused for non-loopback.
         'token': '',
     },
+    'seasons': {
+        # Daily / Weekly / Monthly season values follow the calendar (UTC):
+        # the Daily value is the date, the Weekly one year*100 + ISO week, the
+        # Monthly one year*100 + month, each with that period's start and end.
+        # The client compares against them -- a Hero Dungeon stage is "cleared
+        # today" while its ClearDailySeason equals the Daily value -- so a value
+        # that never changes locks such things for good.  false goes back to
+        # the old fixed value (arena.season) with an always-open window.
+        'calendar': True,
+    },
     'directory': {
         # The in-game server list (the server switch on the title screen).
         # See hc/directory.py and docs/SERVERS.md.
