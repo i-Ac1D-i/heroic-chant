@@ -1,6 +1,57 @@
 # Changelog
 
-## Unreleased
+## 2026-09-28
+
+### World modes
+
+- **Hero Dungeon**: stages can be challenged (one ticket each, once a stage a
+  day), and skipped once cleared.
+- **Dimension Crack**: floors climb in runs that save at each checkpoint;
+  skipping pays the last floor you completed.
+- **Trial Tower**: floors, their clear rewards, the standby reward and the
+  3-a-day limit on the element towers. The Trial Tower shop is still empty.
+- **Advent Boss**: battles work, with the 3-a-day bonus reward.
+- **Cube Dungeon**: opens now, with a monthly rotating season and floor rewards.
+- **World Raid**: single play works. Co-op isn't in yet.
+- Daily tickets (Hero Dungeon, Dimension Crack, Trial Tower, World Raid and
+  more) refill every day.
+
+### Story
+
+- **Hard mode** stages can be played (Hard tickets; a loss costs stamina
+  instead).
+- Stars are saved per stage, each star's reward is paid, and the floor chests
+  can be opened.
+- City Search pays the right amounts (it was paying 720 times too little), and
+  Speed Acquired works.
+
+### Summons
+
+- The Portal's Selective Cube, Time Cube and Dimension Cube work, with no more
+  "the Dimension has dissipated".
+- Equipment Summon works.
+
+### Earrings and necklaces
+
+They're real items now: summon, equip, sell, lock, reroll their stats and fuse
+them.
+
+### Profile
+
+Every account gets all 26 frames, and taking a frame off works.
+
+### Other fixes
+
+- 1v1 Arena: the daily points ladder.
+- Command Center: commanders can be brought into battle, and levelling costs the
+  right amount.
+- Guilds: creating one no longer freezes the game, and guild missions show up.
+- Special Shop tabs show their items.
+- The server list can show more than one server (from settings or a shared
+  list).
+- Modes that aren't in yet say so, instead of freezing the game.
+
+## 2026-09-13
 
 ### Profile
 

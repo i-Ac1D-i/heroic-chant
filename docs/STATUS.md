@@ -1707,3 +1707,43 @@ top-up now hands out 10 (`tickets.extra_daily`).
 Boss ticket and a dozen event counters among them).  All of them refill now,
 except stamina (129), whose row (+161, cap 1) is the client's level-scaled
 stamina bar rather than a top-up.
+
+## Twentieth pass: on the device again (2026-09-28)
+
+CONFIRMED on the device by the user: login with all of the above; Hero
+Dungeon, Dimension Crack (run to the floor-3 checkpoint, then a skip), Trial
+Tower (a floor and its clear reward), Advent Boss, Cube Dungeon and their
+shops; accessory lock and stat reroll; the Time Cube; every Special Shop tab
+shows its items; the Guide Mission claims; the 1v1 Arena.
+
+Fixed and confirmed the same day:
+
+- **Dimension Crack skip** pays the *last completed* floor (the checkpoint), as
+  the user remembers retail doing -- not the next floor.  `tt.last_completed`.
+- **Hard story stages** (30158/30159) were refused.  They need a Hard ticket
+  (123; -468 is the client's "buy tickets" prompt); a win pays like a Normal
+  clear, a loss costs the stage's FailCost stamina.  Hard stages also unlock
+  from their Normal prerequisite (`hardStoryDungeonList.preDungeonID`).
+  `tools/test_hard_dungeon.py`.
+- **City Search broke** after the first Hard / Advent Boss clear: it farmed the
+  highest cleared id (5001, 90001), which has no `rewardTime`.  It now farms
+  the highest cleared stage that has one (Normal only).
+- **Frames**: the client's Release sends FrameID -1 and frame 0 is Champion I,
+  so the old default of 0 wore a frame nobody owned and could not be released.
+  No frame is -1; `account.grant_all_frames` (on) gives all 26 at login.
+  `tools/test_frames.py`.
+- **World Raid single play** (30212/30213): unlocks from collection 48 keyed by
+  the previous raid's group (`CheckWorldRaidSingleDungeonOpen`), a World Raid
+  ticket per clear, cumulative kill-count reward tiers, 3-a-day bonus
+  (dailyRewardGroup 2001).  `hc/game/world_raid.py`, `tools/test_world_raid.py`.
+  Party play is the match-server protocol (50000-50024 / 60000-60050: rooms,
+  ready-ups, battle sync relay; login already points it at this server's
+  port) and is not implemented.
+
+Not solved: the **Trial Tower shop** list is empty and its timer reads
+00:00:00, although the client stores the stock we send at login
+(`LoginSuccess` @0x14E1F5C) and treats the shop as open.  The user thinks it
+opens at main-tower floor 11; left alone at their request.
+
+Parked on branch `npc-requests-wip`: NPC Requests (Daisy / Odet / Frog,
+30067-30071), game logic and handlers written, not wired in or tested.
