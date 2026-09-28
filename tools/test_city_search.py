@@ -49,6 +49,14 @@ def main():
         p.add_resource(gold, 5000)
         p.add_resource(cash, 1000)
 
+        print('\nwhich stage it farms')
+        check('the highest Normal stage cleared', afk.farm_dungeon(p) == 10)
+        p.mark_cleared(5001)          # a Hard stage
+        p.mark_cleared(90001)         # an Advent Boss floor
+        check('Hard stages and boss floors do not take it over (they have no rewardTime)',
+              afk.farm_dungeon(p) == 10, afk.farm_dungeon(p))
+        del p.d['cleared']['5001'], p.d['cleared']['90001']
+
         print('\nthe City Search screen')
         d = call(s, 30008)
         check('the day starts with no purchases', d['_fastReward'].FastRewardRecvCount == 0,

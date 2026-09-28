@@ -80,6 +80,8 @@ def record_win(player, dungeon_id):
     """Count the clear; True the first time."""
     first = not cleared(player, dungeon_id)
     player.add_collection(CollectionType.DungeonClearCount, 1, t2=int(dungeon_id))
+    # Also in `cleared`, which is what the login's open-enable list is built
+    # from (the next floor unlocks off it).  City Search skips these.
     player.mark_cleared(int(dungeon_id))
     return first
 

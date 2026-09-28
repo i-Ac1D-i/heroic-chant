@@ -27,8 +27,11 @@ TICKS_PER_MINUTE = 60 // TICK_SECONDS
 
 
 def farm_dungeon(player):
-    """The stage City Search runs: the highest dungeon id cleared."""
-    cleared = [int(k) for k in player.d.get('cleared', {})]
+    """The stage City Search runs: the highest cleared stage that has a
+    ``rewardTime`` table -- only Normal story stages do.  Hard stages (5001+)
+    and other modes' floors outrank them by id and would pay nothing."""
+    farmable = TABLES.index('rewardTime', 'dungeonID', unique=False)
+    cleared = [int(k) for k in player.d.get('cleared', {}) if int(k) in farmable]
     if cleared:
         return max(cleared)
     return to_int(player.d.get('last_dungeon'), 1)
