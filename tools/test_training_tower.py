@@ -134,12 +134,23 @@ def main():
         check('a tower still on floor 1 has no checkpoint to skip from (1066), ticket kept',
               d['Error'] == 1066 and p.get_resource(28, 2) == before, d['Error'])
         tt.set_current(p, 2, 4)
-        d = call(s, 30043, vecGroupID=[2, 2, 1, 9])
+        from hc.game import rewards
+        rolled, real_roll = [], rewards.roll
+        rewards.roll = lambda did, first_clear, **kw: rolled.append(did) or real_roll(
+            did, first_clear, **kw)
+        try:
+            d = call(s, 30043, vecGroupID=[2, 2, 1, 9])
+        finally:
+            rewards.roll = real_roll
         check('one ticket for tower 2; tower 1 has none; duplicates and junk ignored',
               d['Error'] == 0 and p.get_resource(28, 2) == before - 1
               and p.get_resource(28, 1) == 0, (d['Error'], p.get_resource(28, 2)))
-        check('it pays the current floor\'s drops and does not move the tower',
+        check('it pays the last completed floor (3, the checkpoint), not the next one',
+              rolled == [20103], rolled)
+        check('and does not move the tower',
               bool(d['_CheckInfo'].vecAddResourceInfo) and p.get_resource(29, 2) == 4)
+        check('a tower whose top floor is cleared skips that floor',
+              tt.last_completed(p, 3) == 100 and tt.last_completed(p, 1) == 3)
         p.d['resources']['28:2:-1'] = 0
         p.d['resources']['28:3:-1'] = 0
         d = call(s, 30043, vecGroupID=[2, 3])

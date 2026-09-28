@@ -40,10 +40,13 @@ INFERRED -- the retail rules lived on the server:
   point" means on the select screen.
 * Every floor cleared in a run pays its drops once, first-clear drops the
   first time ever (DungeonClearCount keyed by the floor, as story stages).
-* A skip costs one ticket per tower and pays that tower's current floor's
-  repeat drops -- the rewards the popup previews -- without moving it.  It
-  needs a saved checkpoint: the client has errorString 1066 "You can't skip
-  because there is no checkpoint", so a tower still on floor 1 cannot skip.
+* A skip costs one ticket per tower and pays the repeat drops of the last
+  floor the tower completed -- its last checkpoint -- without moving it.  The
+  user confirmed this is how retail did it (not the next floor, though the
+  all-towers popup previews the next floor's list; the two are near
+  identical).  It needs a saved checkpoint: the client has errorString 1066
+  "You can't skip because there is no checkpoint", so a tower still on floor
+  1 cannot skip.
 * The event-day bonus (EEVENT 102/104 rate on one tower's reward) is not sent.
 """
 from ..data.tables import TABLES, to_int
@@ -90,6 +93,17 @@ def ticket_cost(r):
 def current(player, group):
     """The index of the floor to play next in a tower (at least 1)."""
     return max(player.get_resource(STAGE, int(group)), 1)
+
+
+def last_completed(player, group):
+    """The index of the last floor a tower completed (0 for none): the one
+    below the current floor, or the top floor itself once it is cleared."""
+    idx = current(player, group)
+    top = floor(group, idx)
+    if top is not None and to_int(top.get('NextDungeonID'), -1) < 0 \
+            and cleared_before(player, top['dungeon_ID']):
+        return idx
+    return idx - 1
 
 
 def backfill(player):

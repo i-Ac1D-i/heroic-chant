@@ -83,9 +83,9 @@ async def training_tower_end(s, a):
 
 @handler(30043)
 async def training_tower_skip(s, a):
-    """Skip, for one tower or several: a ticket each, and the tower's current
-    floor's drops -- what the popup previews.  The tower does not move, and
-    one still on floor 1 (no checkpoint saved) cannot skip."""
+    """Skip, for one tower or several: a ticket each, and the drops of the
+    last floor the tower completed (its last checkpoint).  The tower does not
+    move, and one still on floor 1 (no checkpoint saved) cannot skip."""
     p = s.player
     refills.top_up(p)
     tt.backfill(p)
@@ -94,11 +94,9 @@ async def training_tower_skip(s, a):
         if g in seen or g not in tt.GROUPS:
             continue
         seen.add(g)
-        idx = tt.current(p, g)
-        r = tt.floor(g, idx)
+        idx = tt.last_completed(p, g)
+        r = tt.floor(g, idx) if idx >= 1 else None
         if r is None:
-            continue
-        if idx <= 1:
             log.info('dimension crack skip tower %d: no checkpoint saved yet', g)
             err = tt.NO_CHECKPOINT
             continue
