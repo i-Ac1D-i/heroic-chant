@@ -8,7 +8,7 @@ from ..protocol.dto import TYPES
 from ..game import (state, gacha, guild, shop, artifacts, scenecards, missions,
                     mail, guide, achievements, unit_collections, stars,
                     select_gacha, events, accessories, hero_dungeon,
-                    refills, training_tower, ordeal, cube_dungeon)
+                    refills, training_tower, ordeal, cube_dungeon, world_raid)
 from ..game.errors import Err
 from ..game.player import Player
 from .center import login_account
@@ -42,6 +42,8 @@ def _ack01(player):
         ngGuildMember=guild.guild_member_dto(player),
         vecAchievementComplete=achievements.claimed(player),
         vecBossDungeonDailyReward=state.boss_daily_rewards(player),
+        vecWorldRaidClearInfo=world_raid.clear_infos(player),
+        vecWorldRaidDailyReward=[world_raid.daily_info(player)],
         WallPaperID=player.d.get('wallpaper_id', 0),
         TeamType=0,
         # The client opens a second connection for PvP; point it back at us so

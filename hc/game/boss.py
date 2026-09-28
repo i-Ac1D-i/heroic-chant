@@ -114,17 +114,19 @@ def daily_infos(player, now=None):
     return [daily_info(player, to_int(r['groupID']), now) for r in TABLES.json('dailyRewardGroup')]
 
 
-def take_daily(player, dungeon_id, now=None):
-    """The floor's daily bonus if today's count has room; returns the
-    rewards (maybe empty)."""
-    r = _group_row(DAILY_GROUP)
+def take_daily(player, dungeon_id, now=None, group=DAILY_GROUP):
+    """The stage's daily bonus if today's count has room; returns the
+    rewards (maybe empty).  ``group`` is the dailyRewardGroup: 16 for the
+    Advent Boss, 2001 for the World Raid.  (The counts live under
+    'boss_daily_reward' for every group -- the key predates the World Raid.)"""
+    r = _group_row(group)
     limit = to_int(r.get('rewardCount'), 0) if r else 0
     paid = [(to_int(x['rewardType1']), to_int(x['rewardType2']), -1, to_int(x['rewardvalue'], 0))
             for x in TABLES.rows('dailyReward', 'dungeonID', int(dungeon_id), source='json')
-            if to_int(x['groupID']) == DAILY_GROUP]
-    n = daily_count(player, DAILY_GROUP, now)
+            if to_int(x['groupID']) == int(group)]
+    n = daily_count(player, group, now)
     if not paid or n >= limit:
         return []
     season = state.season_value(to_int(r.get('seasonType'), 1), now)
-    player.d.setdefault('boss_daily_reward', {})[str(DAILY_GROUP)] = [season, n + 1]
+    player.d.setdefault('boss_daily_reward', {})[str(int(group))] = [season, n + 1]
     return paid
