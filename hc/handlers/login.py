@@ -101,6 +101,8 @@ async def login(s, a):
     # got the Profile resource add_unit now grants on the way in.
     player.backfill_represent_profiles()
     player.backfill_commanders()
+    # The Change Frame picker lists owned frames only (account.grant_all_frames).
+    player.backfill_frames()
     minted = accessories.migrate_wallet(player)
     if minted:
         log.info('turned %d wallet accessory row(s) into real accessories', minted)

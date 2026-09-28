@@ -68,6 +68,10 @@ DEFAULTS = {
         'starting_resources': {},
         # Give every new account one copy of every playable hero.
         'grant_all_heroes': True,
+        # Give every account (new, and existing ones at login) all 26 profile
+        # frames.  Retail handed them out for 1v1 Arena tiers each season, so
+        # without this there is nothing in the Change Frame picker.
+        'grant_all_frames': True,
         # Start at the rank-30 EXP threshold so hero levelling is not blocked
         # out of the gate.  0 starts at rank 1.
         'starting_exp': -1,            # -1 = keep the built-in default

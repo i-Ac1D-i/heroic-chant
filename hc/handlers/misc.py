@@ -89,17 +89,19 @@ async def change_frame(s, a):
     (see `state.frame_infos`) -- nothing was ever sent there before, so the
     list was always empty and even the Release button (which just sends
     FrameID 0) bailed out client-side with `Error_MyInfoNotReleaseFrame`
-    before a packet was ever written. FrameID 0 is that "no frame" sentinel
-    and always allowed; the 26 real frames (ResourceTable's ResourceID 170)
-    are earned (Arena rank, Tower clears, events), so anything else needs the
-    matching `ResourceType.Frame` resource.
+    before a packet was ever written.  Release sends FrameID -1, the "no
+    frame" value, and is always allowed; the 26 real frames (0..25,
+    ResourceTable's ResourceID 170) need the matching `ResourceType.Frame`
+    resource.
     """
     p = s.player
     frame_id = int(a['FrameID'])
-    if frame_id == p.d.get('frame_id', 0):
+    if frame_id < 0:
+        frame_id = state.NO_FRAME
+    if frame_id == state.current_frame(p):
         await s.send(40327, NMError.Error_MyInfoChangeFrameSameProfile, state.user_info(p))
         return
-    if frame_id != 0 and p.get_resource(ResourceType.Frame, frame_id, -1) < 1:
+    if frame_id >= 0 and p.get_resource(ResourceType.Frame, frame_id, -1) < 1:
         await s.send(40327, NMError.Error_MyInfoChangeFrameNotSelect, state.user_info(p))
         return
     p.d['frame_id'] = frame_id

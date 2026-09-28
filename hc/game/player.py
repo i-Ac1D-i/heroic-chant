@@ -308,6 +308,21 @@ class Player(object):
                                to_int(pr_row['ResourceType2']),
                                to_int(pr_row['ResourceType3']))
 
+    def backfill_frames(self):
+        """All 26 profile frames (ResourceTable ResourceID 170, Type2 0..25)
+        when ``account.grant_all_frames`` is on.  Adds only what is missing;
+        returns how many were added."""
+        if not SETTINGS.get('account.grant_all_frames', True):
+            return 0
+        from ..data.tables import TABLES, to_int
+        added = 0
+        for r in TABLES.rows('ResourceTable', 'ResourceID', ResourceType.Frame, source='json'):
+            fid = to_int(r['Type2'])
+            if self.get_resource(ResourceType.Frame, fid) < 1:
+                self.add_resource(ResourceType.Frame, 1, fid)
+                added += 1
+        return added
+
     def backfill_commanders(self):
         """Saves from before the Command Center was implemented carry only
         commander 1, so Sarah Coldwell (0) and Demitt (2) could not be levelled

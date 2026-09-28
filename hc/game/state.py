@@ -66,8 +66,22 @@ def user_info(player):
         AccountID=player.account_id,
         SkinID=player.d['skin_id'],
         WallPaperID=player.d.get('wallpaper_id', 0),
-        frameInfo=TYPES['NGFrameInfo'](frameID=player.d.get('frame_id', 0)),
+        frameInfo=TYPES['NGFrameInfo'](frameID=current_frame(player)),
     )
+
+
+NO_FRAME = -1       # MyInfoChangeFrame.OnClickRelease sends FrameID -1
+
+
+def current_frame(player):
+    """The frame the profile wears, or -1 for none.  Frame 0 is a real frame
+    (Champion I), so the old default of 0 showed every account wearing one it
+    did not own -- which is also why Release was refused.  Anything not owned
+    reads as none."""
+    fid = int(player.d.get('frame_id', NO_FRAME))
+    if fid < 0 or player.get_resource(ResourceType.Frame, fid) < 1:
+        return NO_FRAME
+    return fid
 
 
 def frame_infos(player):
@@ -77,15 +91,15 @@ def frame_infos(player):
     never resolve the account's *current* selection either, which is why an
     empty list turned even the Release button into Error_MyInfoNotReleaseFrame
     (MyInfoChangeFrame.OnClickRelease bails out first if it can't find one).
-    FrameID 0 is the wire's "no frame" sentinel -- OnClickRelease sends it
-    unconditionally -- so it is always present here, unlike the 26 real
-    frames (ResourceTable's ResourceID 170), which are earned (Arena rank,
-    Tower clears, events) and only listed once owned. seasonType 0 marks a
-    frame as not season-limited; GetFrameList only runs the
+    The owned frames (ResourceTable's ResourceID 170, Type2 0..25 -- 1v1
+    Arena tier rewards; ``account.grant_all_frames`` hands out all of them).
+    "No frame" is -1, not 0: OnClickRelease sends FrameID -1, and frame 0 is
+    the Champion I frame, so it is not listed unless owned. seasonType 0
+    marks a frame as not season-limited; GetFrameList only runs the
     GetNGSeasonValue/endSeason check for seasonType >= 1, so plain ownership
     is enough for everything granted here.
     """
-    out = [TYPES['NGFrameInfo'](frameID=0, seasonType=0, endSeason=0)]
+    out = []
     for t1, t2, t3, v in player.resource_items():
         if t1 == ResourceType.Frame and v > 0:
             out.append(TYPES['NGFrameInfo'](frameID=t2, seasonType=0, endSeason=0))
