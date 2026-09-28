@@ -30,8 +30,7 @@ def open_enables(player):
     out = []
     for row in TABLES.json('dungeonlist'):
         did = to_int(row['dungeon_ID'])
-        pre = to_int(row.get('preDungeonID'), -1)
-        if did in cleared or pre in cleared:
+        if did in cleared or _unlocked(row, cleared):
             out.append(TYPES['NGDungeonOpenEnable'](
                 ContentsID=to_int(row.get('modeID'), 0), DungeonID=did,
                 OpenEnableTime=now, ClearTime=now))
@@ -73,15 +72,27 @@ async def dungeon_start(s, a):
     await s.send(40014, Err.OK, did, a['vecPartyInfo'])
 
 
-@handler(30010)
-async def dungeon_end(s, a):
-    p, did = s.player, a['DungeonID']
-    # ClearType is *how* the stage was played (Default/Fast/Immediate/Clear),
-    # not whether it was won.  There is no retreat or defeat packet anywhere in
-    # the 401 C2S ids: a loss simply returns to the lobby and the server never
-    # hears about it, with the cost charged back at DungeonStart.  So any
-    # DungeonEndReq is a clear.  _StarFlag is the bitmask of star missions met.
-    star = a['_StarFlag']
+def _hard_pre(did):
+    """The Normal stage a Hard stage waits on (hardStoryDungeonList
+    .preDungeonID, e.g. Normal 140 for Hard 5001), or -1.  dungeonlist only
+    chains Hard stages to each other, so a Hard stage needs both."""
+    r = TABLES.row('hardStoryDungeonList', 'dungeon_ID', int(did), source='json')
+    return to_int(r.get('preDungeonID'), -1) if r else -1
+
+
+def _unlocked(row, cleared):
+    """Whether a stage's prerequisites are all in ``cleared``: the stage
+    before it (if any), and for a Hard stage its Normal one too."""
+    pre = to_int(row.get('preDungeonID'), -1)
+    hard_pre = _hard_pre(row['dungeon_ID'])
+    if pre < 0 and hard_pre < 0:
+        return False                  # the very first stages: nothing to unlock them
+    return (pre < 0 or pre in cleared) and (hard_pre < 0 or hard_pre in cleared)
+
+
+def clear_stage(p, did, star):
+    """Record a won story stage (Normal or Hard) and pay for it.  Returns
+    (first, drops, star_drops, exp_total, opened, new_units)."""
     first = p.mark_cleared(did, star or 1)
 
     # DungeonClearCount is what CheckClearDungeon reads, so this is the record
@@ -113,23 +124,104 @@ async def dungeon_end(s, a):
 
     # Unlock whatever this stage gates.
     now = datetime.utcnow()
+    cleared = {int(k) for k in p.d.get('cleared', {})}
     opened = [TYPES['NGDungeonOpenEnable'](
                   ContentsID=to_int(row.get('modeID'), 0),
                   DungeonID=to_int(row['dungeon_ID']),
                   OpenEnableTime=now, ClearTime=now)
               for row in TABLES.json('dungeonlist')
-              if to_int(row.get('preDungeonID'), -1) == int(did)]
+              if int(did) in (to_int(row.get('preDungeonID'), -1), _hard_pre(row['dungeon_ID']))
+              and _unlocked(row, cleared)]
+    new_units = [state.unit_info(u) for u in p.d['units'][-n_new:]] if n_new else []
+    return first, drops, star_drops, exp_total, opened, new_units
 
+
+@handler(30010)
+async def dungeon_end(s, a):
+    p, did = s.player, a['DungeonID']
+    # ClearType is *how* the stage was played (Default/Fast/Immediate/Clear),
+    # not whether it was won.  There is no retreat or defeat packet anywhere in
+    # the 401 C2S ids: a loss simply returns to the lobby and the server never
+    # hears about it, with the cost charged back at DungeonStart.  So any
+    # DungeonEndReq is a clear.  _StarFlag is the bitmask of star missions met.
+    star = a['_StarFlag']
+    first, drops, star_drops, exp_total, opened, new_units = clear_stage(p, did, star)
     p.save()
     log.info('stage %d cleared (first=%s, stars=%d, ClearType=%d): %d drops, %d unlocks',
              did, first, star, a['ClearType'], len(drops), len(opened))
 
-    new_units = [state.unit_info(u) for u in p.d['units'][-n_new:]] if n_new else []
     star_reward_infos = [state.resource_info(*r) for r in star_drops]
     await s.send(40015, Err.OK, _autoplay_info(p),
                  state.resource_sync(p, vecAddUnitInfo=new_units,
                                      vecChangeUserExp=[exp_total]),
                  star_reward_infos, opened)
+
+
+# Hard story stages (modeID 13).  Read off the client:
+#  * HardDungeonTeamSelectSceneInit.Start shows the Hard ticket count
+#    (ResourceType 123, 10 a day from ResourceRefresh), and
+#    NGNetGameServer.HardDungeonStartAck @0x14F83B8 answers error -468 with
+#    the "buy Hard tickets" popup -- so the start is where a missing ticket is
+#    refused.
+#  * HardDungeonPlayScene.GameEnd always sends HardDungeonEndReq, won or lost,
+#    with ClearType the result (1 = win) and the star mask.
+#  * hardStoryDungeonList has no entry cost, only FailCost (15 stamina).
+# INFERRED: a win uses one Hard ticket, a loss costs the FailCost instead.
+HARD_TICKET = 123
+NO_HARD_TICKET = -468
+
+
+def _hard_row(did):
+    return TABLES.row('hardStoryDungeonList', 'dungeon_ID', int(did), source='json')
+
+
+@handler(30158)
+async def hard_dungeon_start(s, a):
+    p, did = s.player, int(a['dungeonID'])
+    party = a['vecPartyInfo'] or []
+    if _hard_row(did) is None or TABLES.dungeon(did) is None:
+        log.warning('unknown hard stage %d', did)
+        await s.send(40174, Err.NOT_FOUND, did, party, state.resource_sync(p))
+        return
+    if p.get_resource(HARD_TICKET) < 1:
+        log.info('hard stage %d refused: no Hard ticket', did)
+        await s.send(40174, NO_HARD_TICKET, did, party, state.resource_sync(p))
+        return
+    if party:
+        p.set_party(party[0].SlotType,
+                    [{'slot_type': u.SlotType, 'slot_index': u.SlotIndex,
+                      'unit_uid': u.UnitUID, 'skill_on_off': u.SkillOnOff} for u in party])
+    p.d['hard_active'] = did
+    p.save()
+    log.info('hard stage %d start', did)
+    await s.send(40174, Err.OK, did, party, state.resource_sync(p))
+
+
+@handler(30159)
+async def hard_dungeon_end(s, a):
+    p, did = s.player, int(a['DungeonID'])
+    active = p.d.pop('hard_active', None)
+    won = int(a['ClearType']) == 1
+    star_drops, opened, extra = [], [], {}
+    if active != did:
+        log.info('hard stage %d end with no battle started -- nothing paid', did)
+    elif won:
+        p.spend_resource(HARD_TICKET, 1)
+        first, drops, star_drops, exp_total, opened, new_units = \
+            clear_stage(p, did, int(a['_StarFlag']))
+        extra = dict(vecAddUnitInfo=new_units, vecChangeUserExp=[exp_total])
+        log.info('hard stage %d cleared (first=%s, stars=%d): %d drops, %d unlocks',
+                 did, first, int(a['_StarFlag']), len(drops), len(opened))
+    else:
+        r = _hard_row(did)
+        cost_t, cost = to_int(r.get('FailCost_Type1'), -1), to_int(r.get('FailCost_Val1'), 0)
+        if cost_t >= 0 and cost > 0:
+            p.spend_resource(cost_t, min(cost, p.get_resource(cost_t)),
+                             to_int(r.get('FailCost_Type2'), -1))
+        log.info('hard stage %d lost (fail cost %d x%d)', did, cost_t, cost)
+    p.save()
+    await s.send(40175, Err.OK, state.resource_sync(p, **extra),
+                 [state.resource_info(*r) for r in star_drops], opened)
 
 
 @handler(30220)

@@ -35,7 +35,6 @@ EVENT = -723          # "This event is not open at the moment.(-723)"
 
 # request id, Ack id, error code, what the player tried
 NOT_OPEN = (
-    (30158, 40174, FLOOR, 'Hard story stage'),
     (30294, 40316, EVENT, 'Other World Boss'),
     (30078, 40084, EVENT, 'Other World Boss (alien)'),
     (30316, 40337, EVENT, 'Wave Raid'),
